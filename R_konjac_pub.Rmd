@@ -1,0 +1,3448 @@
+---
+title: "Konjac Glucomannan Reduces Body Fat, Inflammation, Cholesterol Levels, and Cardiovascular Risk in Adults with Excess Weight: A Triple-Blind, Placebo-Controlled Randomized Clinical Trial"
+author: 'Juan S. Escobar et al. 2025'
+output: html_notebook
+---
+
+# Inital commands
+```{r Initial commands}
+# Clean the work space
+#rm(list = ls())
+
+# Seed for random generation
+set.seed(5600)
+
+# Upload libraries
+library(readxl)
+library(dplyr)
+library(table1)
+library(reshape2)
+library(stringr)
+library(ggplot2)
+library(rstatix)
+library(ggpubr)
+library(cowplot)
+library(phyloseq)
+library(decontam)
+library(BiodiversityR)
+library(tidyverse)
+library(microViz)
+library(ALDEx2)
+
+```
+
+# Required functions
+```{r Required functions}
+# General function to copy-paste R tables into Excel
+write.excel <- function(x, row.names=FALSE, col.names=TRUE, ...) {
+  write.table(x, file = paste0("clipboard-", object.size(x)), sep="\t", row.names=row.names, col.names=col.names,...)
+}
+
+# P-value column for Table 1
+pvalue <- function(x, ...) {
+    # Construct vectors of data y, and groups (strata) g
+    y <- unlist(x)
+    g <- factor(rep(1:length(x), times=sapply(x, length)))
+    if (is.numeric(y)) {
+        # For numeric variables, perform a standard 2-sample t-test
+        p <- t.test(y ~ g, paired = TRUE)$p.value
+    } else {
+        # For categorical variables, perform a chi-squared test of independence
+        p <- chisq.test(table(y, g))$p.value
+    }
+    # Format the p-value, using an HTML entity for the less-than sign.
+    # The initial empty string places the output on the line below the variable label.
+    c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+# Mean, SD, ad 95% confidence intervals for Table 1
+my.render.cont <- function(x) {
+  with(stats.apply.rounding(stats.default(x), digits=2), c("",
+  "N"=stats.default(x)$N,
+  "Mean (SD)"=sprintf("%s (%s)", round(stats.default(x)$MEAN, 2), round(stats.default(x)$SD, 2)),
+  "95% CI"=sprintf("%s &plusmn; %s", round(stats.default(x)$MEAN-qt(0.975,stats.default(x)$N-1)*stats.default(x)$SD/sqrt(stats.default(x)$N),2), round(stats.default(x)$MEAN+qt(0.975,stats.default(x)$N-1)*stats.default(x)$SD/sqrt(stats.default(x)$N),2))))
+}
+
+```
+
+# Analysis all data
+```{r Analysis all data}
+# Load all data ----
+setwd(dir="C:/Documentos Disco D/Vidarium/GitHub/konjac") #change as appropriate
+
+konjac <- read_excel("konjac_db.xlsx")
+
+# Define a color palette
+my_palette <- c("aquamarine2", "dimgrey", "black", "blue", "blueviolet", "yellow", "burlywood4", "chartreuse", "chocolate1", "cyan", "darkgoldenrod1", "forestgreen", "darkred", "deeppink", "bisque", "darkolivegreen", "dodgerblue1", "red")
+
+# Calculate BMI
+konjac$BMI_t1 <- konjac$weight_t1/konjac$height^2
+konjac$BMI_t2 <- konjac$weight_t2/konjac$height^2
+konjac$BMI_t3 <- konjac$weight_t3/konjac$height^2
+
+# Calculate atherogenic index
+konjac$ateroindex_t1 <- konjac$totChol_t1/konjac$HDL_t1
+konjac$ateroindex_t3 <- konjac$totChol_t3/konjac$HDL_t3
+
+# Calculate HOMA-IR
+konjac$homa_t1 <- konjac$insulin_t1*konjac$glycaemia_t1/405
+konjac$homa_t3 <- konjac$insulin_t3*konjac$glycaemia_t3/405
+
+# Calculate mean arterial pressure
+konjac$MAP_t1 <- (konjac$systolic_t1 + konjac$diastolic_t1)/2
+konjac$MAP_t3 <- (konjac$systolic_t3 + konjac$diastolic_t3)/2
+
+# Calculate leptin/adiponectin
+konjac$Leptin_Adiponectin_t1 <- konjac$Leptin_t1/konjac$Adiponectin_t1
+konjac$Leptin_Adiponectin_t3 <- konjac$Leptin_t3/konjac$Adiponectin_t3
+
+# Add supplemented nutrients to the values obtained with 24-h recalls
+konjac$KCAL_t1 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$KCAL_t1+9, konjac$KCAL_t1+7)
+konjac$KCAL_t2 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$KCAL_t2+9, konjac$KCAL_t2+7)
+konjac$KCAL_t3 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$KCAL_t3+9, konjac$KCAL_t3+7)
+
+konjac$CARB_t1 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$CARB_t1+2.10, konjac$CARB_t1+2.31)
+konjac$CARB_t2 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$CARB_t2+2.10, konjac$CARB_t2+2.31)
+konjac$CARB_t3 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$CARB_t3+2.10, konjac$CARB_t3+2.31)
+
+konjac$PROT_t1 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$PROT_t1+0.11, konjac$PROT_t1+0.06)
+konjac$PROT_t2 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$PROT_t2+0.11, konjac$PROT_t2+0.06)
+konjac$PROT_t3 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$PROT_t3+0.11, konjac$PROT_t3+0.06)
+
+konjac$TFAT_t1 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$TFAT_t1+0.12, konjac$TFAT_t1+0.06)
+konjac$TFAT_t2 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$TFAT_t2+0.12, konjac$TFAT_t2+0.06)
+konjac$TFAT_t3 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$TFAT_t3+0.12, konjac$TFAT_t3+0.06)
+
+konjac$FIBE_t1 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$FIBE_t1+0.31, konjac$FIBE_t1+1.30)
+konjac$FIBE_t2 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$FIBE_t2+0.31, konjac$FIBE_t2+1.30)
+konjac$FIBE_t3 <- ifelse(konjac$treatment == "FI236", 
+                         konjac$FIBE_t3+0.31, konjac$FIBE_t3+1.30)
+
+# Calculate normalized nutrient intake
+konjac$KCALperkg_t1 <- konjac$KCAL_t1/konjac$weight_t1
+konjac$KCALperkg_t2 <- konjac$KCAL_t2/konjac$weight_t2
+konjac$KCALperkg_t3 <- konjac$KCAL_t3/konjac$weight_t3
+
+konjac$CARBperkg_t1 <- konjac$CARB_t1/konjac$weight_t1
+konjac$CARBperkg_t2 <- konjac$CARB_t2/konjac$weight_t2
+konjac$CARBperkg_t3 <- konjac$CARB_t3/konjac$weight_t3
+
+konjac$PROTperkg_t1 <- konjac$PROT_t1/konjac$weight_t1
+konjac$PROTperkg_t2 <- konjac$PROT_t2/konjac$weight_t2
+konjac$PROTperkg_t3 <- konjac$PROT_t3/konjac$weight_t3
+
+konjac$TFATperkg_t1 <- konjac$TFAT_t1/konjac$weight_t1
+konjac$TFATperkg_t2 <- konjac$TFAT_t2/konjac$weight_t2
+konjac$TFATperkg_t3 <- konjac$TFAT_t3/konjac$weight_t3
+
+konjac$FIBEperkg_t1 <- konjac$FIBE_t1/konjac$weight_t1
+konjac$FIBEperkg_t2 <- konjac$FIBE_t2/konjac$weight_t2
+konjac$FIBEperkg_t3 <- konjac$FIBE_t3/konjac$weight_t3
+
+konjac$SUGRperkg_t1 <- konjac$SUGR_t1/konjac$weight_t1
+konjac$SUGRperkg_t2 <- konjac$SUGR_t2/konjac$weight_t2
+konjac$SUGRperkg_t3 <- konjac$SUGR_t3/konjac$weight_t3
+
+# Calculate % of macronutrient intake
+konjac$CARBperc_t1 <- konjac$CARB_t1*4/konjac$KCAL_t1*100
+konjac$CARBperc_t2 <- konjac$CARB_t2*4/konjac$KCAL_t2*100
+konjac$CARBperc_t3 <- konjac$CARB_t3*4/konjac$KCAL_t3*100
+
+konjac$PROTperc_t1 <- konjac$PROT_t1*4/konjac$KCAL_t1*100
+konjac$PROTperc_t2 <- konjac$PROT_t2*4/konjac$KCAL_t2*100
+konjac$PROTperc_t3 <- konjac$PROT_t3*4/konjac$KCAL_t3*100
+
+konjac$TFATperc_t1 <- konjac$TFAT_t1*9/konjac$KCAL_t1*100
+konjac$TFATperc_t2 <- konjac$TFAT_t2*9/konjac$KCAL_t2*100
+konjac$TFATperc_t3 <- konjac$TFAT_t3*9/konjac$KCAL_t3*100
+
+# Calculate intervention adherence
+konjac$adh_sachets <- konjac$Sachets_empty/konjac$Sachets_delivered
+
+# Calculate physical activity (daily steps)
+konjac$daily_steps <- konjac$Total_steps/90
+
+# Calculate Framingham Risk Score for Coronary Heart Disease
+konjac$framingham_t1 <- ifelse(konjac$sex == "Male", 52.00961*log(konjac$age) + 20.014077*log(konjac$totChol_t1) + -0.905964*log(konjac$HDL_t1) + 1.305784*log(konjac$systolic_t1) + -4.605038*log(konjac$age)*log(konjac$totChol_t1) + -2.93323*log(konjac$age)*log(konjac$age) - 172.300168 + ifelse(konjac$medication_hypertension_t1 =="Yes", 0.241549, 0), 31.764001*log(konjac$age) + 22.465206*log(konjac$totChol_t1) + -1.187731*log(konjac$HDL_t1) + 2.552905*log(konjac$systolic_t1) + -5.060998*log(konjac$age)*log(konjac$totChol_t1) +  - 146.5933061 + ifelse(konjac$medication_hypertension_t1 =="Yes", 0.420251, 0))
+
+konjac$framingham_t3 <- ifelse(konjac$sex == "Male", 52.00961*log(konjac$age) + 20.014077*log(konjac$totChol_t3) + -0.905964*log(konjac$HDL_t3) + 1.305784*log(konjac$systolic_t3) + -4.605038*log(konjac$age)*log(konjac$totChol_t3) + -2.93323*log(konjac$age)*log(konjac$age) - 172.300168 + ifelse(konjac$medication_hypertension_t1 =="Yes", 0.241549, 0), 31.764001*log(konjac$age) + 22.465206*log(konjac$totChol_t3) + -1.187731*log(konjac$HDL_t3) + 2.552905*log(konjac$systolic_t3) + -5.060998*log(konjac$age)*log(konjac$totChol_t3) +  - 146.5933061 + ifelse(konjac$medication_hypertension_t1 =="Yes", 0.420251, 0))
+
+
+# Calculate deltas (t2-t1 or t3-t1) ----
+konjac$weight_deltat2 <- konjac$weight_t2 - konjac$weight_t1
+konjac$weight_deltat3 <- konjac$weight_t3 - konjac$weight_t1
+konjac$BMI_deltat2 <- konjac$BMI_t2 - konjac$BMI_t1
+konjac$BMI_deltat3 <- konjac$BMI_t3 - konjac$BMI_t1
+konjac$waist_delta <- konjac$waist_t3 - konjac$waist_t1
+konjac$DEXA_MMT_delta <- konjac$DEXA_MMT_t3 - konjac$DEXA_MMT_t1
+konjac$DEXA_per_GC_delta <- konjac$DEXA_per_GC_t3 - konjac$DEXA_per_GC_t1
+konjac$DEXA_FMI_delta <- konjac$DEXA_FMI_t3 - konjac$DEXA_FMI_t1
+konjac$DEXA_FFMI_delta <- konjac$DEXA_FFMI_t3 - konjac$DEXA_FFMI_t1
+konjac$DEXA_AG_delta <- konjac$DEXA_AG_t3 - konjac$DEXA_AG_t1
+konjac$DEXA_ASMMI_delta <- konjac$DEXA_ASMMI_t3 - konjac$DEXA_ASMMI_t1
+konjac$DEXA_VAT_delta <- konjac$DEXA_VAT_t3 - konjac$DEXA_VAT_t1
+konjac$HDL_delta <- konjac$HDL_t3 - konjac$HDL_t1
+konjac$LDL_delta <- konjac$LDL_t3 - konjac$LDL_t1
+konjac$totChol_delta <- konjac$totChol_t3 - konjac$totChol_t1
+konjac$ateroindex_delta <- konjac$ateroindex_t3 - konjac$ateroindex_t1
+konjac$triglycerides_delta <- konjac$triglycerides_t3 - konjac$triglycerides_t1
+konjac$glycaemia_delta <- konjac$glycaemia_t3 - konjac$glycaemia_t1
+konjac$HbA1c_delta <- konjac$HbA1c_t3 - konjac$HbA1c_t1
+konjac$insulin_delta <- konjac$insulin_t3 - konjac$insulin_t1
+konjac$homa_delta <- konjac$homa_t3 - konjac$homa_t1
+konjac$systolic_delta <- konjac$systolic_t3 - konjac$systolic_t1
+konjac$diastolic_delta <- konjac$diastolic_t3 - konjac$diastolic_t1
+konjac$MAP_delta <- konjac$MAP_t3 - konjac$MAP_t1
+konjac$framingham_delta <- konjac$framingham_t3 - konjac$framingham_t1
+konjac$hsCRP_delta <- konjac$hsCRP_t3 - konjac$hsCRP_t1
+konjac$IL_18_delta <- konjac$IL_18_t3 - konjac$IL_18_t1
+konjac$AgRP_ART_delta <- konjac$AgRP_ART_t3 - konjac$AgRP_ART_t1
+konjac$Chemerin_delta <- konjac$Chemerin_t3 - konjac$Chemerin_t1
+konjac$Leptin_delta <- konjac$Leptin_t3 - konjac$Leptin_t1
+konjac$Adiponectin_delta <- konjac$Adiponectin_t3 - konjac$Adiponectin_t1
+konjac$Leptin_Adiponectin_delta <- konjac$Leptin_Adiponectin_t3 - konjac$Leptin_Adiponectin_t1
+konjac$LBP_delta <- konjac$LBP_t3 - konjac$LBP_t1
+konjac$KCAL_deltat2 <- konjac$KCAL_t2 - konjac$KCAL_t1
+konjac$KCAL_deltat3 <- konjac$KCAL_t3 - konjac$KCAL_t1
+konjac$KCALperkg_deltat2 <- konjac$KCALperkg_t2 - konjac$KCALperkg_t1
+konjac$KCALperkg_deltat3 <- konjac$KCALperkg_t3 - konjac$KCALperkg_t1
+konjac$CARB_deltat2 <- konjac$CARB_t2 - konjac$CARB_t1
+konjac$CARB_deltat3 <- konjac$CARB_t3 - konjac$CARB_t1
+konjac$CARBperkg_deltat2 <- konjac$CARBperkg_t2 - konjac$CARBperkg_t1
+konjac$CARBperkg_deltat3 <- konjac$CARBperkg_t3 - konjac$CARBperkg_t1
+konjac$CARBperc_deltat2 <- konjac$CARBperc_t2 - konjac$CARBperc_t1
+konjac$CARBperc_deltat3 <- konjac$CARBperc_t3 - konjac$CARBperc_t1
+konjac$PROT_deltat2 <- konjac$PROT_t2 - konjac$PROT_t1
+konjac$PROT_deltat3 <- konjac$PROT_t3 - konjac$PROT_t1
+konjac$PROTperkg_deltat2 <- konjac$PROTperkg_t2 - konjac$PROTperkg_t1
+konjac$PROTperkg_deltat3 <- konjac$PROTperkg_t3 - konjac$PROTperkg_t1
+konjac$PROTperc_deltat2 <- konjac$PROTperc_t2 - konjac$PROTperc_t1
+konjac$PROTperc_deltat3 <- konjac$PROTperc_t3 - konjac$PROTperc_t1
+konjac$TFAT_deltat2 <- konjac$TFAT_t2 - konjac$TFAT_t1
+konjac$TFAT_deltat3 <- konjac$TFAT_t3 - konjac$TFAT_t1
+konjac$TFATperkg_deltat2 <- konjac$TFATperkg_t2 - konjac$TFATperkg_t1
+konjac$TFATperkg_deltat3 <- konjac$TFATperkg_t3 - konjac$TFATperkg_t1
+konjac$TFATperc_deltat2 <- konjac$TFATperc_t2 - konjac$TFATperc_t1
+konjac$TFATperc_deltat3 <- konjac$TFATperc_t3 - konjac$TFATperc_t1
+konjac$FIBE_deltat2 <- konjac$FIBE_t2 - konjac$FIBE_t1
+konjac$FIBE_deltat3 <- konjac$FIBE_t3 - konjac$FIBE_t1
+konjac$FIBEperkg_deltat2 <- konjac$FIBEperkg_t2 - konjac$FIBEperkg_t1
+konjac$FIBEperkg_deltat3 <- konjac$FIBEperkg_t3 - konjac$FIBEperkg_t1
+konjac$SUGR_deltat2 <- konjac$SUGR_t2 - konjac$SUGR_t1
+konjac$SUGR_deltat3 <- konjac$SUGR_t3 - konjac$SUGR_t1
+konjac$SUGRperkg_deltat2 <- konjac$SUGRperkg_t2 - konjac$SUGRperkg_t1
+konjac$SUGRperkg_deltat3 <- konjac$SUGRperkg_t3 - konjac$SUGRperkg_t1
+konjac$acetic_delta <- konjac$acetic_t3 - konjac$acetic_t1
+konjac$propionic_delta <- konjac$propionic_t3 - konjac$propionic_t1
+konjac$butyric_delta <- konjac$butyric_t3 - konjac$butyric_t1
+konjac$isobutyric_delta <- konjac$isobutyric_t3 - konjac$isobutyric_t1
+konjac$valeric_delta <- konjac$valeric_t3 - konjac$valeric_t1
+
+
+# Select subjects ----
+# Remove missing data (N=36) --> for matched-pair analysis
+# (missing data: KG22 & KG28; pair mates: KG10 & KG17)
+konjac <- konjac %>%
+  plotly::filter(id!="KG22" & id!="KG28" & id!="KG10" & id!="KG17")
+
+# Sensitivity analyses --> remove non-adherent subjects and remove their pairs
+#konjac <- konjac %>%
+#  plotly::filter(adh_sachets>0.80)
+#konjac <- konjac %>%
+#  plotly::filter(id!="KG17" & id!="KG28" & id!="KG22" & id!="KG10" & id!="KG24" & id!="KG05" & id!="KG27" & id!="KG12" & id!="KG46" & id!="KG59" & id!="KG47" & id!="KG54" & id!="KG55" & id!="KG41")
+
+
+# Table 1 ----
+# PA: Double-check the number of subjects removed before obtaining the Table
+table1(~ sex + age + height + weight_t1 + weight_t3 + weight_deltat3 + BMI_t1 + BMI_t3 + BMI_deltat3 + waist_t1 + waist_t3 + waist_delta + DEXA_MMT_t1 + DEXA_MMT_t3 + DEXA_MMT_delta + DEXA_VAT_t1 + DEXA_VAT_t3 + DEXA_VAT_delta + DEXA_per_GC_t1 + DEXA_per_GC_t3 + DEXA_per_GC_delta + DEXA_FMI_t1 + DEXA_FMI_t3 + DEXA_FMI_delta + DEXA_FFMI_t1 + DEXA_FFMI_t3 + DEXA_FFMI_delta + DEXA_AG_t1 + DEXA_AG_t3 + DEXA_AG_delta + DEXA_ASMMI_t1 + DEXA_ASMMI_t3 + DEXA_ASMMI_delta + HDL_t1 + HDL_t3 + HDL_delta + LDL_t1 + LDL_t3 + LDL_delta + totChol_t1 + totChol_t3 + totChol_delta + ateroindex_t1 + ateroindex_t3 + ateroindex_delta + triglycerides_t1 + triglycerides_t3 + triglycerides_delta + glycaemia_t1 + glycaemia_t3 + glycaemia_delta + HbA1c_t1 + HbA1c_t3 + HbA1c_delta + insulin_t1 + insulin_t3 + insulin_delta + homa_t1 + homa_t3 + homa_delta + systolic_t1 + systolic_t3 + systolic_delta + diastolic_t1 + diastolic_t3 + diastolic_delta + framingham_t1 + framingham_t3 + framingham_delta + hsCRP_t1 + hsCRP_t3 + hsCRP_delta + IL_18_t1 + IL_18_t3 + IL_18_delta + AgRP_ART_t1 + AgRP_ART_t3 + AgRP_ART_delta + Leptin_t1 + Leptin_t3 + Leptin_delta + Adiponectin_t1 + Adiponectin_t3 + Adiponectin_delta + Leptin_Adiponectin_t1 + Leptin_Adiponectin_t3 + Leptin_Adiponectin_delta + Chemerin_t1 + Chemerin_t3 + Chemerin_delta + LBP_t1 + LBP_t3 + LBP_delta + acetic_t1 + acetic_t3 + acetic_delta + propionic_t1 + propionic_t3 + propionic_delta + butyric_t1 + butyric_t3 + butyric_delta + isobutyric_t1 + isobutyric_t3 + isobutyric_delta + valeric_t1 + valeric_t3 + valeric_delta + daily_steps + adh_sachets | treatment, data = konjac, overall=FALSE, render.continuous=my.render.cont)
+
+
+# Matched-pair analysis ----
+
+# Separate treatments (FI236 = placebo; FI418 = konjac glucomannan)
+konjac_FI236 <- konjac[konjac$treatment =="FI236",]
+konjac_FI418 <- konjac[konjac$treatment =="FI418",]
+
+# Melt dataset for graphs
+konjac_graphs.df_melt <- melt(plotly::select(konjac, starts_with("id") | starts_with("pair_match") | starts_with("treatment") | starts_with("sex") | starts_with("age") | !contains("DEXA")), id = c("id","pair_match","treatment","sex","age"))
+
+konjac_graphs.df_melt$time <-
+  ifelse(str_ends(konjac_graphs.df_melt$variable, "_t1")==TRUE, "t1",
+         ifelse(str_ends(konjac_graphs.df_melt$variable, "_t2")==TRUE, "t2",
+                ifelse(str_ends(konjac_graphs.df_melt$variable, "_t3")==TRUE, "t3", "ERROR!")))
+konjac_graphs.df_melt$value <- as.numeric(konjac_graphs.df_melt$value)
+
+treatment_names <- c('FI236' = "Control",
+                     'FI418' = "Konjac")
+
+
+# Anthropometry ----
+### Body weight (kg) ----
+shapiro.test(konjac$weight_t1)
+fligner.test(konjac$weight_t1 ~ konjac$treatment)
+t.test(konjac$weight_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$weight_t3)
+fligner.test(konjac$weight_t3 ~ konjac$treatment)
+t.test(konjac$weight_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$weight_deltat3)
+fligner.test(konjac$weight_deltat3 ~ konjac$treatment)
+t.test(konjac$weight_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$weight_t3, konjac_FI236$weight_t1, paired = TRUE)
+t.test(konjac_FI418$weight_t3, konjac_FI418$weight_t1, paired = TRUE)
+
+weight_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "weight_t1" | konjac_graphs.df_melt$variable == "weight_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Body weight (kg)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+weight.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "weight_t1" | konjac_graphs.df_melt$variable == "weight_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+weight.test <- weight.test %>% add_xy_position(x = "time")
+
+weight_plot <- weight_plot + stat_pvalue_manual(weight.test, tip.length = 0, size=6)
+
+
+### BMI (kg/m2) ----
+shapiro.test(konjac$BMI_t1)
+fligner.test(konjac$BMI_t1 ~ konjac$treatment)
+t.test(konjac$BMI_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$BMI_t3)
+fligner.test(konjac$BMI_t3 ~ konjac$treatment)
+t.test(konjac$BMI_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$BMI_deltat3)
+fligner.test(konjac$BMI_deltat3 ~ konjac$treatment)
+t.test(konjac$BMI_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$BMI_t3, konjac_FI236$BMI_t1, paired = TRUE)
+t.test(konjac_FI418$BMI_t3, konjac_FI418$BMI_t1, paired = TRUE)
+
+BMI_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "BMI_t1" | konjac_graphs.df_melt$variable == "BMI_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 30, linetype = 'dotted', col = 'red') + 
+  geom_hline(yintercept = 25, linetype = 'dotted', col = 'darkgreen') + 
+  labs(x = "", y = bquote("BMI "~(kg/m^2))) +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+BMI.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "BMI_t1" | konjac_graphs.df_melt$variable == "BMI_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+BMI.test <- BMI.test %>% add_xy_position(x = "time")
+
+BMI_plot <- BMI_plot + stat_pvalue_manual(BMI.test, tip.length = 0, size=6)
+
+
+### Waist circumference (cm) ----
+shapiro.test(konjac$waist_t1)
+fligner.test(konjac$waist_t1 ~ konjac$treatment)
+t.test(konjac$waist_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$waist_t3)
+fligner.test(konjac$waist_t3 ~ konjac$treatment)
+t.test(konjac$waist_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$waist_delta)
+fligner.test(konjac$waist_delta ~ konjac$treatment)
+t.test(konjac$waist_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$waist_t3, konjac_FI236$waist_t1, paired = TRUE)
+t.test(konjac_FI418$waist_t3, konjac_FI418$waist_t1, paired = TRUE)
+
+waist_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "waist_t1" | konjac_graphs.df_melt$variable == "waist_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_hline(yintercept = 102, linetype = 'dotted', col = 'red') +
+  geom_hline(yintercept = 88, linetype = 'dashed', col = 'red') + 
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  labs(x = "", y = "Waist circumference (cm)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+waist.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "waist_t1" | konjac_graphs.df_melt$variable == "waist_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+waist.test <- waist.test %>% add_xy_position(x = "time")
+
+waist_plot <- waist_plot + stat_pvalue_manual(waist.test, tip.length = 0, size=6)
+
+
+# DEXA ----
+# Remove participants with no DEXA and pair mates (missing data: KG03, KG22, KG27, KG28, KG31, KG36; pair mates: KG04, KG10, KG12, KG17, KG15, KG39
+konjac_dexa <- konjac %>%
+  plotly::filter(id!="KG03" & id!="KG04" & id!="KG10" & id!="KG12" & id!="KG15" & id!="KG17" & id!="KG22" & id!="KG27" & id!="KG28" & id!="KG31" & id!="KG36" & id!="KG39")
+
+# Calculate delta (t3-t1)
+konjac_dexa$DEXA_MMT_delta <- konjac_dexa$DEXA_MMT_t3 - konjac_dexa$DEXA_MMT_t1
+konjac_dexa$DEXA_per_GC_delta <- konjac_dexa$DEXA_per_GC_t3 - konjac_dexa$DEXA_per_GC_t1
+konjac_dexa$DEXA_FMI_delta <- konjac_dexa$DEXA_FMI_t3 - konjac_dexa$DEXA_FMI_t1
+konjac_dexa$DEXA_FFMI_delta <- konjac_dexa$DEXA_FFMI_t3 - konjac_dexa$DEXA_FFMI_t1
+konjac_dexa$DEXA_AG_delta <- konjac_dexa$DEXA_AG_t3 - konjac_dexa$DEXA_AG_t1
+konjac_dexa$DEXA_ASMMI_delta <- konjac_dexa$DEXA_ASMMI_t3 - konjac_dexa$DEXA_ASMMI_t1
+konjac_dexa$DEXA_VAT_delta <- konjac_dexa$DEXA_VAT_t3 - konjac_dexa$DEXA_VAT_t1
+
+
+# Melt dataset for graphs
+konjac_dexa_graphs.df_melt <- melt(plotly::select(konjac_dexa, starts_with("id") | starts_with("pair_match") | starts_with("treatment") | starts_with("sex") | starts_with("age") | contains("DEXA")), id = c("id","pair_match","treatment","sex","age"))
+
+konjac_dexa_graphs.df_melt$time <-
+  ifelse(str_ends(konjac_dexa_graphs.df_melt$variable, "_t1")==TRUE, "t1",
+         ifelse(str_ends(konjac_dexa_graphs.df_melt$variable, "_t2")==TRUE, "t2",
+                ifelse(str_ends(konjac_dexa_graphs.df_melt$variable, "_t3")==TRUE, "t3", "ERROR!")))
+
+# Separate per treatment
+konjac_dexa_FI236 <- konjac_dexa[konjac_dexa$treatment =="FI236",]
+konjac_dexa_FI418 <- konjac_dexa[konjac_dexa$treatment =="FI418",]
+
+treatment_names <- c('FI236' = "Control",
+                     'FI418' = "Konjac")
+
+
+### DEXA Fat Mass Index (kg/m2) ----
+shapiro.test(konjac_dexa$DEXA_FMI_t1)
+fligner.test(konjac_dexa$DEXA_FMI_t1 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_FMI_t1 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_FMI_t3)
+fligner.test(konjac_dexa$DEXA_FMI_t3 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_FMI_t3 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_FMI_delta)
+fligner.test(konjac_dexa$DEXA_FMI_delta ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_FMI_delta ~ konjac_dexa$treatment, paired = TRUE)
+
+t.test(konjac_dexa_FI236$DEXA_FMI_t3, konjac_dexa_FI236$DEXA_FMI_t1, paired = TRUE)
+t.test(konjac_dexa_FI418$DEXA_FMI_t3, konjac_dexa_FI418$DEXA_FMI_t1, paired = TRUE)
+
+DEXA_FMI_plot <- ggplot(konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_FMI_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_FMI_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 9, linetype = 'dotted', col = 'red') +
+  geom_hline(yintercept = 13, linetype = 'dashed', col = 'red') + 
+  labs(x = "", y = bquote("DEXA FMI "~(kg/m^2))) +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+DEXA_FMI.test <- konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_FMI_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_FMI_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+DEXA_FMI.test <- DEXA_FMI.test %>% add_xy_position(x = "time")
+
+DEXA_FMI_plot <- DEXA_FMI_plot + stat_pvalue_manual(DEXA_FMI.test, label = "p", tip.length = 0, size=6)
+
+
+### DEXA Visceral fat area (cm2) ----
+shapiro.test(konjac_dexa$DEXA_VAT_t1)
+fligner.test(konjac_dexa$DEXA_VAT_t1 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_VAT_t1 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_VAT_t3)
+fligner.test(konjac_dexa$DEXA_VAT_t3 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_VAT_t3 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_VAT_delta)
+fligner.test(konjac_dexa$DEXA_VAT_delta ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_VAT_delta ~ konjac_dexa$treatment, paired = TRUE)
+
+t.test(konjac_dexa_FI236$DEXA_VAT_t3, konjac_dexa_FI236$DEXA_VAT_t1, paired = TRUE)
+t.test(konjac_dexa_FI418$DEXA_VAT_t3, konjac_dexa_FI418$DEXA_VAT_t1, paired = TRUE)
+
+DEXA_VAT_plot <- ggplot(konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_VAT_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_VAT_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 100, linetype = 'dotted', col = 'red') +
+  labs(x = "", y = bquote("DEXA VAT "~(cm^2))) +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+DEXA_VAT.test <- konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_VAT_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_VAT_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+DEXA_VAT.test <- DEXA_VAT.test %>% add_xy_position(x = "time")
+
+DEXA_VAT_plot <- DEXA_VAT_plot + stat_pvalue_manual(DEXA_VAT.test, tip.length = 0, size=6)
+
+
+### DEXA Android/Gynoid ratio ----
+shapiro.test(konjac_dexa$DEXA_AG_t1)
+fligner.test(konjac_dexa$DEXA_AG_t1 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_AG_t1 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_AG_t3)
+fligner.test(konjac_dexa$DEXA_AG_t3 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_AG_t3 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_AG_delta)
+fligner.test(konjac_dexa$DEXA_AG_delta ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_AG_delta ~ konjac_dexa$treatment, paired = TRUE)
+
+t.test(konjac_dexa_FI236$DEXA_AG_t3, konjac_dexa_FI236$DEXA_AG_t1, paired = TRUE)
+t.test(konjac_dexa_FI418$DEXA_AG_t3, konjac_dexa_FI418$DEXA_AG_t1, paired = TRUE)
+
+DEXA_AG_plot <- ggplot(konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_AG_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_AG_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 1, linetype = 'dotted', col = 'red') +
+  geom_hline(yintercept = 0.9, linetype = 'dashed', col = 'red') +
+  labs(x = "", y = "DEXA Android/Gynoid") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+DEXA_AG.test <- konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_AG_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_AG_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+DEXA_AG.test <- DEXA_AG.test %>% add_xy_position(x = "time")
+
+DEXA_AG_plot <- DEXA_AG_plot + stat_pvalue_manual(DEXA_AG.test, label = "p", tip.length = 0, size=6)
+
+
+### DEXA Body Fat (%) ----
+shapiro.test(konjac_dexa$DEXA_per_GC_t1)
+fligner.test(konjac_dexa$DEXA_per_GC_t1 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_per_GC_t1 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_per_GC_t3)
+fligner.test(konjac_dexa$DEXA_per_GC_t3 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_per_GC_t3 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_per_GC_delta)
+fligner.test(konjac_dexa$DEXA_per_GC_delta ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_per_GC_delta ~ konjac_dexa$treatment, paired = TRUE)
+
+t.test(konjac_dexa_FI236$DEXA_per_GC_t3, konjac_dexa_FI236$DEXA_per_GC_t1, paired = TRUE)
+t.test(konjac_dexa_FI418$DEXA_per_GC_t3, konjac_dexa_FI418$DEXA_per_GC_t1, paired = TRUE)
+
+DEXA_per_GC_plot <- ggplot(konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_per_GC_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_per_GC_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 25, linetype = 'dotted', col = 'red') +
+  geom_hline(yintercept = 33, linetype = 'dashed', col = 'red') + 
+  labs(x = "", y = "DEXA Body Fat (%)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+DEXA_per_GC.test <- konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_per_GC_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_per_GC_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+DEXA_per_GC.test <- DEXA_per_GC.test %>% add_xy_position(x = "time")
+
+DEXA_per_GC_plot <- DEXA_per_GC_plot + stat_pvalue_manual(DEXA_per_GC.test, tip.length = 0, size=6)
+
+
+### DEXA Total Muscular Mass (kg) ----
+shapiro.test(konjac_dexa$DEXA_MMT_t1)
+fligner.test(konjac_dexa$DEXA_MMT_t1 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_MMT_t1 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_MMT_t3)
+fligner.test(konjac_dexa$DEXA_MMT_t3 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_MMT_t3 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_MMT_delta)
+fligner.test(konjac_dexa$DEXA_MMT_delta ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_MMT_delta ~ konjac_dexa$treatment, paired = TRUE)
+wilcox.test(konjac_dexa$DEXA_MMT_delta ~ konjac_dexa$treatment, paired = TRUE)
+
+t.test(konjac_dexa_FI236$DEXA_MMT_t3, konjac_dexa_FI236$DEXA_MMT_t1, paired = TRUE)
+t.test(konjac_dexa_FI418$DEXA_MMT_t3, konjac_dexa_FI418$DEXA_MMT_t1, paired = TRUE)
+
+DEXA_MMT_plot <- ggplot(konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_MMT_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_MMT_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "DEXA Total\nMuscular Mass (kg)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+DEXA_MMT.test <- konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_MMT_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_MMT_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+DEXA_MMT.test <- DEXA_MMT.test %>% add_xy_position(x = "time")
+
+DEXA_MMT_plot <- DEXA_MMT_plot + stat_pvalue_manual(DEXA_MMT.test, label = "p", tip.length = 0, size=6)
+
+
+### DEXA Free Fat Mass Index (kg/m2) ----
+shapiro.test(konjac_dexa$DEXA_FFMI_t1)
+fligner.test(konjac_dexa$DEXA_FFMI_t1 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_FFMI_t1 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_FFMI_t3)
+fligner.test(konjac_dexa$DEXA_FFMI_t3 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_FFMI_t3 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_FFMI_delta)
+fligner.test(konjac_dexa$DEXA_FFMI_delta ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_FFMI_delta ~ konjac_dexa$treatment, paired = TRUE)
+
+t.test(konjac_dexa_FI236$DEXA_FFMI_t3, konjac_dexa_FI236$DEXA_FFMI_t1, paired = TRUE)
+t.test(konjac_dexa_FI418$DEXA_FFMI_t3, konjac_dexa_FI418$DEXA_FFMI_t1, paired = TRUE)
+
+DEXA_FFMI_plot <- ggplot(konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_FFMI_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_FFMI_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 17, linetype = 'dotted', col = 'red') +
+  geom_hline(yintercept = 15, linetype = 'dashed', col = 'red') + 
+  labs(x = "", y = bquote("DEXA FFMI "~(kg/m^2))) +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+DEXA_FFMI.test <- konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_FFMI_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_FFMI_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+DEXA_FFMI.test <- DEXA_FFMI.test %>% add_xy_position(x = "time")
+
+DEXA_FFMI_plot <- DEXA_FFMI_plot + stat_pvalue_manual(DEXA_FFMI.test, tip.length = 0, size=6)
+
+
+### DEXA Appendicular skeletal muscle mass index (kg/m2) ----
+shapiro.test(konjac_dexa$DEXA_ASMMI_t1)
+fligner.test(konjac_dexa$DEXA_ASMMI_t1 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_ASMMI_t1 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_ASMMI_t3)
+fligner.test(konjac_dexa$DEXA_ASMMI_t3 ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_ASMMI_t3 ~ konjac_dexa$treatment, paired = TRUE)
+
+shapiro.test(konjac_dexa$DEXA_ASMMI_delta)
+fligner.test(konjac_dexa$DEXA_ASMMI_delta ~ konjac_dexa$treatment)
+t.test(konjac_dexa$DEXA_ASMMI_delta ~ konjac_dexa$treatment, paired = TRUE)
+
+t.test(konjac_dexa_FI236$DEXA_ASMMI_t3, konjac_dexa_FI236$DEXA_ASMMI_t1, paired = TRUE)
+t.test(konjac_dexa_FI418$DEXA_ASMMI_t3, konjac_dexa_FI418$DEXA_ASMMI_t1, paired = TRUE)
+
+DEXA_ASMMI_plot <- ggplot(konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_ASMMI_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_ASMMI_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 7.25, linetype = 'dotted', col = 'red') +
+  geom_hline(yintercept = 5.67, linetype = 'dashed', col = 'red') +
+  labs(x = "", y = bquote("DEXA ASMMI "~(kg/m^2))) +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+DEXA_ASMMI.test <- konjac_dexa_graphs.df_melt[konjac_dexa_graphs.df_melt$variable == "DEXA_ASMMI_t1" | konjac_dexa_graphs.df_melt$variable == "DEXA_ASMMI_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+DEXA_ASMMI.test <- DEXA_ASMMI.test %>% add_xy_position(x = "time")
+
+DEXA_ASMMI_plot <- DEXA_ASMMI_plot + stat_pvalue_manual(DEXA_ASMMI.test, tip.length = 0, size=6)
+
+
+### Figure 2 ----
+plot_grid(weight_plot, BMI_plot, DEXA_FMI_plot, DEXA_VAT_plot, DEXA_AG_plot, DEXA_per_GC_plot, DEXA_MMT_plot, DEXA_FFMI_plot, DEXA_ASMMI_plot, nrow=3, ncol=3, labels="AUTO")
+
+
+# Lipid profile ----
+### HDL (mg/dL) ----
+shapiro.test(konjac$HDL_t1)
+fligner.test(konjac$HDL_t1 ~ konjac$treatment)
+t.test(konjac$HDL_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$HDL_t3)
+fligner.test(konjac$HDL_t3 ~ konjac$treatment)
+t.test(konjac$HDL_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$HDL_delta)
+fligner.test(konjac$HDL_delta ~ konjac$treatment)
+t.test(konjac$HDL_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$HDL_t3, konjac_FI236$HDL_t1, paired = TRUE)
+t.test(konjac_FI418$HDL_t3, konjac_FI418$HDL_t1, paired = TRUE)
+
+HDL_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "HDL_t1" | konjac_graphs.df_melt$variable == "HDL_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 40, linetype = 'dotted', col = 'red') + 
+  geom_hline(yintercept = 50, linetype = 'dotted', col = 'darkgreen') + 
+  labs(x = "", y = "HDL (mg/dL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+HDL.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "HDL_t1" | konjac_graphs.df_melt$variable == "HDL_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+HDL.test <- HDL.test %>% add_xy_position(x = "time")
+
+HDL_plot <- HDL_plot + stat_pvalue_manual(HDL.test, tip.length = 0, size=6)
+
+
+### LDL (mg/dL) ----
+shapiro.test(konjac$LDL_t1)
+fligner.test(konjac$LDL_t1 ~ konjac$treatment)
+t.test(konjac$LDL_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$LDL_t3)
+fligner.test(konjac$LDL_t3 ~ konjac$treatment)
+t.test(konjac$LDL_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$LDL_delta)
+fligner.test(konjac$LDL_delta ~ konjac$treatment)
+t.test(konjac$LDL_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$LDL_t3, konjac_FI236$LDL_t1, paired = TRUE)
+t.test(konjac_FI418$LDL_t3, konjac_FI418$LDL_t1, paired = TRUE)
+
+LDL_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "LDL_t1" | konjac_graphs.df_melt$variable == "LDL_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 100, linetype = 'dotted', col = 'darkgreen') +
+  geom_hline(yintercept = 150, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "LDL (mg/dL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+LDL.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "LDL_t1" | konjac_graphs.df_melt$variable == "LDL_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+LDL.test <- LDL.test %>% add_xy_position(x = "time")
+
+LDL_plot <- LDL_plot + stat_pvalue_manual(LDL.test, tip.length = 0, size=6)
+
+
+### Total cholesterol (mg/dL) ----
+shapiro.test(konjac$totChol_t1)
+fligner.test(konjac$totChol_t1 ~ konjac$treatment)
+t.test(konjac$totChol_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$totChol_t3)
+fligner.test(konjac$totChol_t3 ~ konjac$treatment)
+t.test(konjac$totChol_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$totChol_delta)
+fligner.test(konjac$totChol_delta ~ konjac$treatment)
+t.test(konjac$totChol_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$totChol_t3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$totChol_t3, konjac_FI236$totChol_t1, paired = TRUE)
+t.test(konjac_FI418$totChol_t3, konjac_FI418$totChol_t1, paired = TRUE)
+
+totChol_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "totChol_t1" | konjac_graphs.df_melt$variable == "totChol_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 200, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "Total cholesterol (mg/dL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+totChol.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "totChol_t1" | konjac_graphs.df_melt$variable == "totChol_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+totChol.test <- totChol.test %>% add_xy_position(x = "time")
+
+totChol_plot <- totChol_plot + stat_pvalue_manual(totChol.test, tip.length = 0, size=6)
+
+
+### Atherogenic index (adimensional) ----
+shapiro.test(log(konjac$ateroindex_t1))
+fligner.test(konjac$ateroindex_t1 ~ konjac$treatment)
+t.test(log(konjac$ateroindex_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$ateroindex_t3))
+fligner.test(konjac$ateroindex_t3 ~ konjac$treatment)
+t.test(log(konjac$ateroindex_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$ateroindex_delta)
+fligner.test(konjac$ateroindex_delta ~ konjac$treatment)
+t.test(konjac$ateroindex_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$ateroindex_t3, konjac_FI236$ateroindex_t1, paired = TRUE)
+t.test(konjac_FI418$ateroindex_t3, konjac_FI418$ateroindex_t1, paired = TRUE)
+
+ateroindex_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "ateroindex_t1" | konjac_graphs.df_melt$variable == "ateroindex_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 3.5, linetype = 'dotted', col = 'darkgreen') +
+  geom_hline(yintercept = 4.5, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "Atherogenic index") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+ateroindex.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "ateroindex_t1" | konjac_graphs.df_melt$variable == "ateroindex_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+ateroindex.test <- ateroindex.test %>% add_xy_position(x = "time")
+
+ateroindex_plot <- ateroindex_plot + stat_pvalue_manual(ateroindex.test, tip.length = 0, size=6)
+
+
+### Figure 3 ----
+plot_grid(HDL_plot, LDL_plot, totChol_plot, ateroindex_plot, nrow = 2, ncol = 2, labels = "AUTO")
+
+
+### Triglycerides (mg/dL) ----
+shapiro.test(log(konjac$triglycerides_t1))
+fligner.test(konjac$triglycerides_t1 ~ konjac$treatment)
+t.test(log(konjac$triglycerides_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$triglycerides_t3))
+fligner.test(konjac$triglycerides_t3 ~ konjac$treatment)
+t.test(log(konjac$triglycerides_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$triglycerides_delta)
+fligner.test(konjac$triglycerides_delta ~ konjac$treatment)
+t.test(konjac$triglycerides_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$triglycerides_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$triglycerides_t3, konjac_FI236$triglycerides_t1, paired = TRUE)
+t.test(konjac_FI418$triglycerides_t3, konjac_FI418$triglycerides_t1, paired = TRUE)
+
+triglycerides_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "triglycerides_t1" | konjac_graphs.df_melt$variable == "triglycerides_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 150, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "Triglycerides (mg/dL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+triglycerides.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "triglycerides_t1" | konjac_graphs.df_melt$variable == "triglycerides_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+triglycerides.test <- triglycerides.test %>% add_xy_position(x = "time")
+
+triglycerides_plot <- triglycerides_plot + stat_pvalue_manual(triglycerides.test, tip.length = 0, size=6)
+
+
+# Glucose metabolism ----
+### Fasting glycaemia (mg/dL) ----
+shapiro.test(konjac$glycaemia_t1)
+fligner.test(konjac$glycaemia_t1 ~ konjac$treatment)
+t.test(konjac$glycaemia_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$glycaemia_t3)
+fligner.test(konjac$glycaemia_t3 ~ konjac$treatment)
+t.test(konjac$glycaemia_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$glycaemia_delta)
+fligner.test(konjac$glycaemia_delta ~ konjac$treatment)
+t.test(konjac$glycaemia_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$glycaemia_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$glycaemia_t3, konjac_FI236$glycaemia_t1, paired = TRUE)
+t.test(konjac_FI418$glycaemia_t3, konjac_FI418$glycaemia_t1, paired = TRUE)
+
+glycaemia_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "glycaemia_t1" | konjac_graphs.df_melt$variable == "glycaemia_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 100, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "Fasting glycaemia (mg/dL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+glycaemia.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "glycaemia_t1" | konjac_graphs.df_melt$variable == "glycaemia_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+glycaemia.test <- glycaemia.test %>% add_xy_position(x = "time")
+
+glycaemia_plot <- glycaemia_plot + stat_pvalue_manual(glycaemia.test, tip.length = 0, size=6)
+
+
+### Glycated hemoglobin A1c (%) ----
+shapiro.test(konjac$HbA1c_t1)
+fligner.test(konjac$HbA1c_t1 ~ konjac$treatment)
+t.test(konjac$HbA1c_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$HbA1c_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$HbA1c_t3)
+fligner.test(konjac$HbA1c_t3 ~ konjac$treatment)
+t.test(konjac$HbA1c_t3 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$HbA1c_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$HbA1c_delta)
+fligner.test(konjac$HbA1c_delta ~ konjac$treatment)
+t.test(konjac$HbA1c_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$HbA1c_t3, konjac_FI236$HbA1c_t1, paired = TRUE)
+t.test(konjac_FI418$HbA1c_t3, konjac_FI418$HbA1c_t1, paired = TRUE)
+
+HbA1c_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "HbA1c_t1" | konjac_graphs.df_melt$variable == "HbA1c_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 5.7, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "HbA1c (%)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+HbA1c.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "HbA1c_t1" | konjac_graphs.df_melt$variable == "HbA1c_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+HbA1c.test <- HbA1c.test %>% add_xy_position(x = "time")
+
+HbA1c_plot <- HbA1c_plot + stat_pvalue_manual(HbA1c.test, tip.length = 0, size=6)
+
+
+### Fasting insulin (µUI/dL) ----
+shapiro.test(log(konjac$insulin_t1))
+fligner.test(konjac$insulin_t1 ~ konjac$treatment)
+t.test(log(konjac$insulin_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$insulin_t3)
+fligner.test(konjac$insulin_t3 ~ konjac$treatment)
+t.test(konjac$insulin_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$insulin_delta)
+fligner.test(konjac$insulin_delta ~ konjac$treatment)
+t.test(konjac$insulin_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$insulin_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$insulin_t3, konjac_FI236$insulin_t1, paired = TRUE)
+t.test(konjac_FI418$insulin_t3, konjac_FI418$insulin_t1, paired = TRUE)
+
+insulin_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "insulin_t1" | konjac_graphs.df_melt$variable == "insulin_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 23, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "Fasting insulin (µUI/mL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+insulin.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "insulin_t1" | konjac_graphs.df_melt$variable == "insulin_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+insulin.test <- insulin.test %>% add_xy_position(x = "time")
+
+insulin_plot <- insulin_plot + stat_pvalue_manual(insulin.test, tip.length = 0, size=6)
+
+
+### HOMA-IR (adimensional) ----
+shapiro.test(log(konjac$homa_t1))
+fligner.test(konjac$homa_t1 ~ konjac$treatment)
+t.test(log(konjac$homa_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$homa_t3))
+fligner.test(konjac$homa_t3 ~ konjac$treatment)
+t.test(log(konjac$homa_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$homa_delta)
+fligner.test(konjac$homa_delta ~ konjac$treatment)
+t.test(konjac$homa_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$homa_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$homa_t3, konjac_FI236$homa_t1, paired = TRUE)
+t.test(konjac_FI418$homa_t3, konjac_FI418$homa_t1, paired = TRUE)
+
+homa_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "homa_t1" | konjac_graphs.df_melt$variable == "homa_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 3, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "HOMA-IR") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+homa.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "homa_t1" | konjac_graphs.df_melt$variable == "homa_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+homa.test <- homa.test %>% add_xy_position(x = "time")
+
+homa_plot <- homa_plot + stat_pvalue_manual(homa.test, tip.length = 0, size=6)
+
+
+### Supplementary Figure S2 ----
+plot_grid(triglycerides_plot, glycaemia_plot, HbA1c_plot, insulin_plot, ncol=2, nrow=2, lables="AUTO")
+
+
+# Blood pressure ----
+### Systolic blood pressure (mm Hg) ----
+shapiro.test(konjac$systolic_t1)
+fligner.test(konjac$systolic_t1 ~ konjac$treatment)
+t.test(konjac$systolic_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$systolic_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$systolic_t3)
+fligner.test(konjac$systolic_t3 ~ konjac$treatment)
+t.test(konjac$systolic_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$systolic_delta)
+fligner.test(konjac$systolic_delta ~ konjac$treatment)
+t.test(konjac$systolic_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$systolic_t3, konjac_FI236$systolic_t1, paired = TRUE)
+t.test(konjac_FI418$systolic_t3, konjac_FI418$systolic_t1, paired = TRUE)
+
+systolic_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "systolic_t1" | konjac_graphs.df_melt$variable == "systolic_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 120, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "Systolic blood pressure (mm Hg)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+systolic.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "systolic_t1" | konjac_graphs.df_melt$variable == "systolic_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+systolic.test <- systolic.test %>% add_xy_position(x = "time")
+
+systolic_plot <- systolic_plot + stat_pvalue_manual(systolic.test, tip.length = 0, size=6)
+
+
+### Diastolic blood pressure (mm Hg) ----
+shapiro.test(konjac$diastolic_t1)
+fligner.test(konjac$diastolic_t1 ~ konjac$treatment)
+t.test(konjac$diastolic_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$diastolic_t3)
+fligner.test(konjac$diastolic_t3 ~ konjac$treatment)
+t.test(konjac$diastolic_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$diastolic_delta)
+fligner.test(konjac$diastolic_delta ~ konjac$treatment)
+t.test(konjac$diastolic_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$diastolic_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$diastolic_t3, konjac_FI236$diastolic_t1, paired = TRUE)
+t.test(konjac_FI418$diastolic_t3, konjac_FI418$diastolic_t1, paired = TRUE)
+
+diastolic_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "diastolic_t1" | konjac_graphs.df_melt$variable == "diastolic_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 80, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "Diastolic blood pressure (mm Hg)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+diastolic.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "diastolic_t1" | konjac_graphs.df_melt$variable == "diastolic_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+diastolic.test <- diastolic.test %>% add_xy_position(x = "time")
+
+diastolic_plot <- diastolic_plot + stat_pvalue_manual(diastolic.test, tip.length = 0, size=6)
+
+
+### Mean arterial pressure (mm Hg) ----
+shapiro.test(konjac$MAP_t1)
+fligner.test(konjac$MAP_t1 ~ konjac$treatment)
+t.test(konjac$MAP_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$MAP_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$MAP_t3)
+fligner.test(konjac$MAP_t3 ~ konjac$treatment)
+t.test(konjac$MAP_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$MAP_delta)
+fligner.test(konjac$MAP_delta ~ konjac$treatment)
+t.test(konjac$MAP_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$MAP_t3, konjac_FI236$MAP_t1, paired = TRUE)
+t.test(konjac_FI418$MAP_t3, konjac_FI418$MAP_t1, paired = TRUE)
+
+MAP_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "MAP_t1" | konjac_graphs.df_melt$variable == "MAP_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 100, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "Mean arterial pressure (mm Hg)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+MAP.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "MAP_t1" | konjac_graphs.df_melt$variable == "MAP_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+MAP.test <- MAP.test %>% add_xy_position(x = "time")
+
+MAP_plot <- MAP_plot + stat_pvalue_manual(MAP.test, tip.length = 0, size=6)
+
+
+# Framingham score ----
+shapiro.test(konjac$framingham_t1)
+fligner.test(konjac$framingham_t1 ~ konjac$treatment)
+t.test(konjac$framingham_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$framingham_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$framingham_t3)
+fligner.test(konjac$framingham_t3 ~ konjac$treatment)
+t.test(konjac$framingham_t3 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$framingham_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$framingham_delta)
+fligner.test(konjac$framingham_delta ~ konjac$treatment)
+t.test(konjac$framingham_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$framingham_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$framingham_t3, konjac_FI236$framingham_t1, paired = TRUE)
+t.test(konjac_FI418$framingham_t3, konjac_FI418$framingham_t1, paired = TRUE)
+
+framingham_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "framingham_t1" | konjac_graphs.df_melt$variable == "framingham_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Framingham score") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+framingham.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "framingham_t1" | konjac_graphs.df_melt$variable == "framingham_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+framingham.test <- framingham.test %>% add_xy_position(x = "time")
+
+framingham_plot <- framingham_plot + stat_pvalue_manual(framingham.test, tip.length = 0, size=6)
+
+
+# Inflammation, adipokines, LBP, isoprostane ----
+### High-sensitivity C reactive protein (mg/L) ----
+shapiro.test(log(konjac$hsCRP_t1))
+fligner.test(konjac$hsCRP_t1 ~ konjac$treatment)
+t.test(log(konjac$hsCRP_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$hsCRP_t3))
+fligner.test(konjac$hsCRP_t3 ~ konjac$treatment)
+t.test(log(konjac$hsCRP_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$hsCRP_delta)
+fligner.test(konjac$hsCRP_delta ~ konjac$treatment)
+t.test(konjac$hsCRP_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$hsCRP_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$hsCRP_t3, konjac_FI236$hsCRP_t1, paired = TRUE)
+t.test(konjac_FI418$hsCRP_t3, konjac_FI418$hsCRP_t1, paired = TRUE)
+
+hsCRP_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "hsCRP_t1" | konjac_graphs.df_melt$variable == "hsCRP_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 3, linetype = 'dotted', col = 'red') + 
+  labs(x = "", y = "hs-CRP (mg/L)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+hsCRP.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "hsCRP_t1" | konjac_graphs.df_melt$variable == "hsCRP_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+hsCRP.test <- hsCRP.test %>% add_xy_position(x = "time")
+
+hsCRP_plot <- hsCRP_plot + stat_pvalue_manual(hsCRP.test, tip.length = 0, size=6)
+
+
+### IL-18 (pg/mL) ----
+shapiro.test(log(konjac$IL_18_t1))
+fligner.test(konjac$IL_18_t1 ~ konjac$treatment)
+t.test(log(konjac$IL_18_t1) ~ konjac$treatment, paired = TRUE)
+wilcox.test(log(konjac$IL_18_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$IL_18_t3))
+fligner.test(konjac$IL_18_t3 ~ konjac$treatment)
+t.test(log(konjac$IL_18_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$IL_18_delta)
+fligner.test(konjac$IL_18_delta ~ konjac$treatment)
+t.test(konjac$IL_18_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$IL_18_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$IL_18_t3, konjac_FI236$IL_18_t1, paired = TRUE)
+t.test(konjac_FI418$IL_18_t3, konjac_FI418$IL_18_t1, paired = TRUE)
+
+IL_18_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "IL_18_t1" | konjac_graphs.df_melt$variable == "IL_18_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "IL-18 (pg/mL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+IL_18.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "IL_18_t1" | konjac_graphs.df_melt$variable == "IL_18_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+IL_18.test <- IL_18.test %>% add_xy_position(x = "time")
+
+IL_18_plot <- IL_18_plot + stat_pvalue_manual(IL_18.test, tip.length = 0, size=6)
+
+
+### Leptin (ng/mL) ----
+shapiro.test(log(konjac$Leptin_t1))
+fligner.test(konjac$Leptin_t1 ~ konjac$treatment)
+t.test(log(konjac$Leptin_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$Leptin_t3))
+fligner.test(konjac$Leptin_t3 ~ konjac$treatment)
+t.test(log(konjac$Leptin_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$Leptin_delta)
+fligner.test(konjac$Leptin_delta ~ konjac$treatment)
+t.test(konjac$Leptin_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$Leptin_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$Leptin_t3, konjac_FI236$Leptin_t1, paired = TRUE)
+t.test(konjac_FI418$Leptin_t3, konjac_FI418$Leptin_t1, paired = TRUE)
+
+Leptin_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "Leptin_t1" | konjac_graphs.df_melt$variable == "Leptin_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Leptin (ng/mL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+Leptin.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "Leptin_t1" | konjac_graphs.df_melt$variable == "Leptin_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+Leptin.test <- Leptin.test %>% add_xy_position(x = "time")
+
+Leptin_plot <- Leptin_plot + stat_pvalue_manual(Leptin.test, tip.length = 0, size=6)
+
+
+### Adiponectin (ng/mL) ----
+shapiro.test(konjac$Adiponectin_t1)
+fligner.test(konjac$Adiponectin_t1 ~ konjac$treatment)
+t.test(konjac$Adiponectin_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$Adiponectin_t3)
+fligner.test(konjac$Adiponectin_t3 ~ konjac$treatment)
+t.test(konjac$Adiponectin_t3 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$Adiponectin_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$Adiponectin_delta)
+fligner.test(konjac$Adiponectin_delta ~ konjac$treatment)
+t.test(konjac$Adiponectin_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$Adiponectin_t3, konjac_FI236$Adiponectin_t1, paired = TRUE)
+t.test(konjac_FI418$Adiponectin_t3, konjac_FI418$Adiponectin_t1, paired = TRUE)
+
+Adiponectin_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "Adiponectin_t1" | konjac_graphs.df_melt$variable == "Adiponectin_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Adiponectin (ng/mL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+Adiponectin.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "Adiponectin_t1" | konjac_graphs.df_melt$variable == "Adiponectin_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+Adiponectin.test <- Adiponectin.test %>% add_xy_position(x = "time")
+
+Adiponectin_plot <- Adiponectin_plot + stat_pvalue_manual(Adiponectin.test, tip.length = 0, size=6)
+
+
+### Leptin/Adiponectin (adimensional) ----
+shapiro.test(log(konjac$Leptin_Adiponectin_t1))
+fligner.test(konjac$Leptin_Adiponectin_t1 ~ konjac$treatment)
+t.test(log(konjac$Leptin_Adiponectin_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$Leptin_Adiponectin_t3))
+fligner.test(konjac$Leptin_Adiponectin_t3 ~ konjac$treatment)
+t.test(log(konjac$Leptin_Adiponectin_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$Leptin_Adiponectin_delta)
+fligner.test(konjac$Leptin_Adiponectin_delta ~ konjac$treatment)
+t.test(konjac$Leptin_Adiponectin_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$Leptin_Adiponectin_t3, konjac_FI236$Leptin_Adiponectin_t1, paired = TRUE)
+t.test(konjac_FI418$Leptin_Adiponectin_t3, konjac_FI418$Leptin_Adiponectin_t1, paired = TRUE)
+
+Leptin_Adiponectin_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "Leptin_Adiponectin_t1" | konjac_graphs.df_melt$variable == "Leptin_Adiponectin_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 2, linetype = 'dotted', col = 'red') + 
+  geom_hline(yintercept = 1, linetype = 'dotted', col = 'darkgreen') + 
+  labs(x = "", y = "Leptin/Adiponectin") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+Leptin_Adiponectin.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "Leptin_Adiponectin_t1" | konjac_graphs.df_melt$variable == "Leptin_Adiponectin_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+Leptin_Adiponectin.test <- Leptin_Adiponectin.test %>% add_xy_position(x = "time")
+
+Leptin_Adiponectin_plot <- Leptin_Adiponectin_plot + stat_pvalue_manual(Leptin_Adiponectin.test, tip.length = 0, size=6)
+
+
+### AgRP/ART (pg/mL) ----
+shapiro.test(log(konjac$AgRP_ART_t1))
+fligner.test(konjac$AgRP_ART_t1 ~ konjac$treatment)
+t.test(log(konjac$AgRP_ART_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$AgRP_ART_t3)
+fligner.test(konjac$AgRP_ART_t3 ~ konjac$treatment)
+t.test(konjac$AgRP_ART_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$AgRP_ART_delta)
+fligner.test(konjac$AgRP_ART_delta ~ konjac$treatment)
+t.test(konjac$AgRP_ART_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$AgRP_ART_t3, konjac_FI236$AgRP_ART_t1, paired = TRUE)
+t.test(konjac_FI418$AgRP_ART_t3, konjac_FI418$AgRP_ART_t1, paired = TRUE)
+
+AgRP_ART_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "AgRP_ART_t1" | konjac_graphs.df_melt$variable == "AgRP_ART_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "AgRP/ART (pg/mL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+AgRP_ART.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "AgRP_ART_t1" | konjac_graphs.df_melt$variable == "AgRP_ART_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+AgRP_ART.test <- AgRP_ART.test %>% add_xy_position(x = "time")
+
+AgRP_ART_plot <- AgRP_ART_plot + stat_pvalue_manual(AgRP_ART.test, tip.length = 0, size=6)
+
+
+### Chemerin (ng/mL) ----
+shapiro.test(konjac$Chemerin_t1)
+fligner.test(konjac$Chemerin_t1 ~ konjac$treatment)
+t.test(konjac$Chemerin_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$Chemerin_t3)
+fligner.test(konjac$Chemerin_t3 ~ konjac$treatment)
+t.test(konjac$Chemerin_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$Chemerin_delta)
+fligner.test(konjac$Chemerin_delta ~ konjac$treatment)
+t.test(konjac$Chemerin_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$Chemerin_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$Chemerin_t3, konjac_FI236$Chemerin_t1, paired = TRUE)
+t.test(konjac_FI418$Chemerin_t3, konjac_FI418$Chemerin_t1, paired = TRUE)
+
+Chemerin_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "Chemerin_t1" | konjac_graphs.df_melt$variable == "Chemerin_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Chemerin (ng/mL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+Chemerin.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "Chemerin_t1" | konjac_graphs.df_melt$variable == "Chemerin_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+Chemerin.test <- Chemerin.test %>% add_xy_position(x = "time")
+
+Chemerin_plot <- Chemerin_plot + stat_pvalue_manual(Chemerin.test, tip.length = 0, size=6)
+
+
+### Figure 4 ----
+plot_grid(MAP_plot, framingham_plot, hsCRP_plot, IL_18_plot, Leptin_plot, Leptin_Adiponectin_plot, AgRP_ART_plot, Chemerin_plot, nrow=2, ncol=4, labels="AUTO")
+
+
+### LBP (ug/mL) ----
+shapiro.test(log(konjac$LBP_t1))
+fligner.test(konjac$LBP_t1 ~ konjac$treatment)
+t.test(log(konjac$LBP_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$LBP_t3)
+fligner.test(konjac$LBP_t3 ~ konjac$treatment)
+t.test(konjac$LBP_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$LBP_delta)
+fligner.test(konjac$LBP_delta ~ konjac$treatment)
+t.test(konjac$LBP_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$LBP_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$LBP_t3, konjac_FI236$LBP_t1, paired = TRUE)
+t.test(konjac_FI418$LBP_t3, konjac_FI418$LBP_t1, paired = TRUE)
+
+LBP_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "LBP_t1" | konjac_graphs.df_melt$variable == "LBP_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "LBP (µg/mL)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+LBP.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "LBP_t1" | konjac_graphs.df_melt$variable == "LBP_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+LBP.test <- LBP.test %>% add_xy_position(x = "time")
+
+LBP_plot <- LBP_plot + stat_pvalue_manual(LBP.test, tip.length = 0, size=6)
+
+
+# Food intake ----
+### Energy intake (kcal/day) ----
+shapiro.test(konjac$KCAL_t1)
+fligner.test(konjac$KCAL_t1 ~ konjac$treatment)
+t.test(konjac$KCAL_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$KCAL_t2)
+fligner.test(konjac$KCAL_t2 ~ konjac$treatment)
+t.test(konjac$KCAL_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$KCAL_t3)
+fligner.test(konjac$KCAL_t3 ~ konjac$treatment)
+t.test(konjac$KCAL_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$KCAL_deltat2)
+fligner.test(konjac$KCAL_deltat2 ~ konjac$treatment)
+t.test(konjac$KCAL_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$KCAL_deltat3)
+fligner.test(konjac$KCAL_deltat3 ~ konjac$treatment)
+t.test(konjac$KCAL_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$KCAL_t2, konjac_FI236$KCAL_t1, paired = TRUE)
+t.test(konjac_FI236$KCAL_t3, konjac_FI236$KCAL_t1, paired = TRUE)
+t.test(konjac_FI418$KCAL_t2, konjac_FI418$KCAL_t1, paired = TRUE)
+t.test(konjac_FI418$KCAL_t3, konjac_FI418$KCAL_t1, paired = TRUE)
+
+KCAL_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "KCAL_t1" | konjac_graphs.df_melt$variable == "KCAL_t2" | konjac_graphs.df_melt$variable == "KCAL_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Energy intake (kcal/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+KCAL.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "KCAL_t1" | konjac_graphs.df_melt$variable == "KCAL_t2" | konjac_graphs.df_melt$variable == "KCAL_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+KCAL.test <- KCAL.test %>% add_xy_position(x = "time")
+
+KCAL_plot <- KCAL_plot + stat_pvalue_manual(KCAL.test, label = "p", tip.length = 0, size=6)
+
+
+### Normalized energy intake (kcal/day/kg) ----
+shapiro.test(konjac$KCALperkg_t1)
+fligner.test(konjac$KCALperkg_t1 ~ konjac$treatment)
+t.test(konjac$KCALperkg_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$KCALperkg_t2)
+fligner.test(konjac$KCALperkg_t2 ~ konjac$treatment)
+t.test(konjac$KCALperkg_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$KCALperkg_t3)
+fligner.test(konjac$KCALperkg_t3 ~ konjac$treatment)
+t.test(konjac$KCALperkg_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$KCALperkg_deltat2)
+fligner.test(konjac$KCALperkg_deltat2 ~ konjac$treatment)
+t.test(konjac$KCALperkg_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$KCALperkg_deltat3)
+fligner.test(konjac$KCALperkg_deltat3 ~ konjac$treatment)
+t.test(konjac$KCALperkg_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$KCALperkg_t2, konjac_FI236$KCALperkg_t1, paired = TRUE)
+t.test(konjac_FI236$KCALperkg_t3, konjac_FI236$KCALperkg_t1, paired = TRUE)
+t.test(konjac_FI418$KCALperkg_t2, konjac_FI418$KCALperkg_t1, paired = TRUE)
+t.test(konjac_FI418$KCALperkg_t3, konjac_FI418$KCALperkg_t1, paired = TRUE)
+
+KCALperkg_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "KCALperkg_t1" | konjac_graphs.df_melt$variable == "KCALperkg_t2" | konjac_graphs.df_melt$variable == "KCALperkg_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 16, linetype = 'dotted', color = 'black') + 
+  geom_hline(yintercept = 20, linetype = 'dotted', color = 'black') + 
+  labs(x = "", y = "Normalized energy\nintake (kcal/day/kg)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+KCALperkg.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "KCALperkg_t1" | konjac_graphs.df_melt$variable == "KCALperkg_t2" | konjac_graphs.df_melt$variable == "KCALperkg_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+KCALperkg.test <- KCALperkg.test %>% add_xy_position(x = "time")
+
+KCALperkg_plot <- KCALperkg_plot + stat_pvalue_manual(KCALperkg.test, label = "p", tip.length = 0, size=6)
+
+
+### Carbohydrate intake (g/day) ----
+shapiro.test(konjac$CARB_t1)
+fligner.test(konjac$CARB_t1 ~ konjac$treatment)
+t.test(konjac$CARB_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$CARB_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARB_t2)
+fligner.test(konjac$CARB_t2 ~ konjac$treatment)
+t.test(konjac$CARB_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARB_t3)
+fligner.test(konjac$CARB_t3 ~ konjac$treatment)
+t.test(konjac$CARB_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARB_deltat2)
+fligner.test(konjac$CARB_deltat2 ~ konjac$treatment)
+t.test(konjac$CARB_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARB_deltat3)
+fligner.test(konjac$CARB_deltat3 ~ konjac$treatment)
+t.test(konjac$CARB_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$CARB_t2, konjac_FI236$CARB_t1, paired = TRUE)
+t.test(konjac_FI236$CARB_t3, konjac_FI236$CARB_t1, paired = TRUE)
+t.test(konjac_FI418$CARB_t2, konjac_FI418$CARB_t1, paired = TRUE)
+t.test(konjac_FI418$CARB_t3, konjac_FI418$CARB_t1, paired = TRUE)
+
+CARB_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "CARB_t1" | konjac_graphs.df_melt$variable == "CARB_t2" | konjac_graphs.df_melt$variable == "CARB_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Carbohydrate intake (g/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+CARB.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "CARB_t1" | konjac_graphs.df_melt$variable == "CARB_t2" | konjac_graphs.df_melt$variable == "CARB_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+CARB.test <- CARB.test %>% add_xy_position(x = "time")
+
+CARB_plot <- CARB_plot + stat_pvalue_manual(CARB.test, label = "p", tip.length = 0, size=6)
+
+
+### Normalized carbohydrate intake (g/kg/day) ----
+shapiro.test(konjac$CARBperkg_t1)
+fligner.test(konjac$CARBperkg_t1 ~ konjac$treatment)
+t.test(konjac$CARBperkg_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARBperkg_t2)
+fligner.test(konjac$CARBperkg_t2 ~ konjac$treatment)
+t.test(konjac$CARBperkg_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARBperkg_t3)
+fligner.test(konjac$CARBperkg_t3 ~ konjac$treatment)
+t.test(konjac$CARBperkg_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARB_deltat2)
+fligner.test(konjac$CARB_deltat2 ~ konjac$treatment)
+t.test(konjac$CARB_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARB_deltat3)
+fligner.test(konjac$CARB_deltat3 ~ konjac$treatment)
+t.test(konjac$CARB_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$CARBperkg_t2, konjac_FI236$CARBperkg_t1, paired = TRUE)
+t.test(konjac_FI236$CARBperkg_t3, konjac_FI236$CARBperkg_t1, paired = TRUE)
+t.test(konjac_FI418$CARBperkg_t2, konjac_FI418$CARBperkg_t1, paired = TRUE)
+t.test(konjac_FI418$CARBperkg_t3, konjac_FI418$CARBperkg_t1, paired = TRUE)
+
+CARBperkg_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "CARBperkg_t1" | konjac_graphs.df_melt$variable == "CARBperkg_t2" | konjac_graphs.df_melt$variable == "CARBperkg_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Normalized carbohydrate\nintake (g/kg/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+CARBperkg.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "CARBperkg_t1" | konjac_graphs.df_melt$variable == "CARBperkg_t2" | konjac_graphs.df_melt$variable == "CARBperkg_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+CARBperkg.test <- CARBperkg.test %>% add_xy_position(x = "time")
+
+CARBperkg_plot <- CARBperkg_plot + stat_pvalue_manual(CARBperkg.test, label = "p", tip.length = 0, size=6)
+
+
+### Carbohydrate intake (% of total energy) ----
+shapiro.test(konjac$CARBperc_t1)
+fligner.test(konjac$CARBperc_t1 ~ konjac$treatment)
+t.test(konjac$CARBperc_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$CARBperc_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARBperc_t2)
+fligner.test(konjac$CARBperc_t2 ~ konjac$treatment)
+t.test(konjac$CARBperc_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARBperc_t3)
+fligner.test(konjac$CARBperc_t3 ~ konjac$treatment)
+t.test(konjac$CARBperc_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARBperc_deltat2)
+fligner.test(konjac$CARBperc_deltat2 ~ konjac$treatment)
+t.test(konjac$CARBperc_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$CARBperc_deltat3)
+fligner.test(konjac$CARBperc_deltat3 ~ konjac$treatment)
+t.test(konjac$CARBperc_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$CARBperc_t2, konjac_FI236$CARBperc_t1, paired = TRUE)
+t.test(konjac_FI236$CARBperc_t3, konjac_FI236$CARBperc_t1, paired = TRUE)
+t.test(konjac_FI418$CARBperc_t2, konjac_FI418$CARBperc_t1, paired = TRUE)
+t.test(konjac_FI418$CARBperc_t3, konjac_FI418$CARBperc_t1, paired = TRUE)
+
+CARBperc_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "CARBperc_t1" | konjac_graphs.df_melt$variable == "CARBperc_t2" | konjac_graphs.df_melt$variable == "CARBperc_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 40, linetype = 'dotted', col = 'black') + 
+  geom_hline(yintercept = 55, linetype = 'dotted', col = 'black') + 
+  labs(x = "", y = "Carbohydrate intake (% of energy)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+CARBperc.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "CARBperc_t1" | konjac_graphs.df_melt$variable == "CARBperc_t2" | konjac_graphs.df_melt$variable == "CARBperc_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+CARBperc.test <- CARBperc.test %>% add_xy_position(x = "time")
+
+CARBperc_plot <- CARBperc_plot + stat_pvalue_manual(CARBperc.test, label = "p", tip.length = 0, size=6)
+
+
+### Protein intake (g/day) ----
+shapiro.test(konjac$PROT_t1)
+fligner.test(konjac$PROT_t1 ~ konjac$treatment)
+t.test(konjac$PROT_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROT_t2)
+fligner.test(konjac$PROT_t2 ~ konjac$treatment)
+t.test(konjac$PROT_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROT_t3)
+fligner.test(konjac$PROT_t3 ~ konjac$treatment)
+t.test(konjac$PROT_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROT_deltat2)
+fligner.test(konjac$PROT_deltat2 ~ konjac$treatment)
+t.test(konjac$PROT_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROT_deltat3)
+fligner.test(konjac$PROT_deltat3 ~ konjac$treatment)
+t.test(konjac$PROT_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$PROT_t2, konjac_FI236$PROT_t1, paired = TRUE)
+t.test(konjac_FI236$PROT_t3, konjac_FI236$PROT_t1, paired = TRUE)
+t.test(konjac_FI418$PROT_t2, konjac_FI418$PROT_t1, paired = TRUE)
+t.test(konjac_FI418$PROT_t3, konjac_FI418$PROT_t1, paired = TRUE)
+
+PROT_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "PROT_t1" | konjac_graphs.df_melt$variable == "PROT_t2" | konjac_graphs.df_melt$variable == "PROT_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Protein intake (g/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+PROT.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "PROT_t1" | konjac_graphs.df_melt$variable == "PROT_t2" | konjac_graphs.df_melt$variable == "PROT_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+PROT.test <- PROT.test %>% add_xy_position(x = "time")
+
+PROT_plot <- PROT_plot + stat_pvalue_manual(PROT.test, label = "p", tip.length = 0, size=6)
+
+
+### Normalized protein intake (g/kg/day) ----
+shapiro.test(konjac$PROTperkg_t1)
+fligner.test(konjac$PROTperkg_t1 ~ konjac$treatment)
+t.test(konjac$PROTperkg_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$PROTperkg_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROTperkg_t2)
+fligner.test(konjac$PROTperkg_t2 ~ konjac$treatment)
+t.test(konjac$PROTperkg_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROTperkg_t3)
+fligner.test(konjac$PROTperkg_t3 ~ konjac$treatment)
+t.test(konjac$PROTperkg_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROTperkg_deltat2)
+fligner.test(konjac$PROTperkg_deltat2 ~ konjac$treatment)
+t.test(konjac$PROTperkg_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROTperkg_deltat3)
+fligner.test(konjac$PROTperkg_deltat3 ~ konjac$treatment)
+
+t.test(konjac_FI236$PROTperkg_t2, konjac_FI236$PROTperkg_t1, paired = TRUE)
+t.test(konjac_FI236$PROTperkg_t3, konjac_FI236$PROTperkg_t1, paired = TRUE)
+t.test(konjac_FI418$PROTperkg_t2, konjac_FI418$PROTperkg_t1, paired = TRUE)
+t.test(konjac_FI418$PROTperkg_t3, konjac_FI418$PROTperkg_t1, paired = TRUE)
+
+PROTperkg_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "PROTperkg_t1" | konjac_graphs.df_melt$variable == "PROTperkg_t2" | konjac_graphs.df_melt$variable == "PROTperkg_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Normalized protein\nintake (g/kg/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+PROTperkg.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "PROTperkg_t1" | konjac_graphs.df_melt$variable == "PROTperkg_t2" | konjac_graphs.df_melt$variable == "PROTperkg_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+PROTperkg.test <- PROTperkg.test %>% add_xy_position(x = "time")
+
+PROTperkg_plot <- PROTperkg_plot + stat_pvalue_manual(PROTperkg.test, label = "p", tip.length = 0, size=6)
+
+
+### Protein intake (% of total energy) ----
+shapiro.test(konjac$PROTperc_t1)
+fligner.test(konjac$PROTperc_t1 ~ konjac$treatment)
+t.test(konjac$PROTperc_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$PROTperc_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROTperc_t2)
+fligner.test(konjac$PROTperc_t2 ~ konjac$treatment)
+t.test(konjac$PROTperc_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROTperc_t3)
+fligner.test(konjac$PROTperc_t3 ~ konjac$treatment)
+t.test(konjac$PROTperc_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROTperc_deltat2)
+fligner.test(konjac$PROTperc_deltat2 ~ konjac$treatment)
+t.test(konjac$PROTperc_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$PROTperc_deltat3)
+fligner.test(konjac$PROTperc_deltat3 ~ konjac$treatment)
+t.test(konjac$PROTperc_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$PROTperc_t2, konjac_FI236$PROTperc_t1, paired = TRUE)
+t.test(konjac_FI236$PROTperc_t3, konjac_FI236$PROTperc_t1, paired = TRUE)
+t.test(konjac_FI418$PROTperc_t2, konjac_FI418$PROTperc_t1, paired = TRUE)
+t.test(konjac_FI418$PROTperc_t3, konjac_FI418$PROTperc_t1, paired = TRUE)
+
+PROTperc_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "PROTperc_t1" | konjac_graphs.df_melt$variable == "PROTperc_t2" | konjac_graphs.df_melt$variable == "PROTperc_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 20, linetype = 'dotted', col = 'black') + 
+  geom_hline(yintercept = 25, linetype = 'dotted', col = 'black') + 
+  labs(x = "", y = "Protein intake (% of energy)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+PROTperc.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "PROTperc_t1" | konjac_graphs.df_melt$variable == "PROTperc_t2" | konjac_graphs.df_melt$variable == "PROTperc_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+PROTperc.test <- PROTperc.test %>% add_xy_position(x = "time")
+
+PROTperc_plot <- PROTperc_plot + stat_pvalue_manual(PROTperc.test, label = "p", tip.length = 0, size=6)
+
+
+### Total fat intake (g/day) ----
+shapiro.test(konjac$TFAT_t1)
+fligner.test(konjac$TFAT_t1 ~ konjac$treatment)
+t.test(konjac$TFAT_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$TFAT_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFAT_t2)
+fligner.test(konjac$TFAT_t2 ~ konjac$treatment)
+t.test(konjac$TFAT_t2 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$TFAT_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFAT_t3)
+fligner.test(konjac$TFAT_t3 ~ konjac$treatment)
+t.test(konjac$TFAT_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFAT_deltat2)
+fligner.test(konjac$TFAT_deltat2 ~ konjac$treatment)
+t.test(konjac$TFAT_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFAT_deltat3)
+fligner.test(konjac$TFAT_deltat3 ~ konjac$treatment)
+t.test(konjac$TFAT_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$TFAT_t2, konjac_FI236$TFAT_t1, paired = TRUE)
+t.test(konjac_FI236$TFAT_t3, konjac_FI236$TFAT_t1, paired = TRUE)
+t.test(konjac_FI418$TFAT_t2, konjac_FI418$TFAT_t1, paired = TRUE)
+t.test(konjac_FI418$TFAT_t3, konjac_FI418$TFAT_t1, paired = TRUE)
+
+TFAT_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "TFAT_t1" | konjac_graphs.df_melt$variable == "TFAT_t2" | konjac_graphs.df_melt$variable == "TFAT_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Total fat intake (g/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+TFAT.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "TFAT_t1" | konjac_graphs.df_melt$variable == "TFAT_t2" | konjac_graphs.df_melt$variable == "TFAT_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+TFAT.test <- TFAT.test %>% add_xy_position(x = "time")
+
+TFAT_plot <- TFAT_plot + stat_pvalue_manual(TFAT.test, label = "p", tip.length = 0, size=6)
+
+
+### Normalized total fat intake (g/kg/day) ----
+shapiro.test(konjac$TFATperkg_t1)
+fligner.test(konjac$TFATperkg_t1 ~ konjac$treatment)
+t.test(konjac$TFATperkg_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$TFATperkg_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFATperkg_t2)
+fligner.test(konjac$TFATperkg_t2 ~ konjac$treatment)
+t.test(konjac$TFATperkg_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFATperkg_t3)
+fligner.test(konjac$TFATperkg_t3 ~ konjac$treatment)
+t.test(konjac$TFATperkg_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFAT_deltat2)
+fligner.test(konjac$TFAT_deltat2 ~ konjac$treatment)
+t.test(konjac$TFAT_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFAT_deltat3)
+fligner.test(konjac$TFAT_deltat3 ~ konjac$treatment)
+t.test(konjac$TFAT_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$TFATperkg_t2, konjac_FI236$TFATperkg_t1, paired = TRUE)
+t.test(konjac_FI236$TFATperkg_t3, konjac_FI236$TFATperkg_t1, paired = TRUE)
+t.test(konjac_FI418$TFATperkg_t2, konjac_FI418$TFATperkg_t1, paired = TRUE)
+t.test(konjac_FI418$TFATperkg_t3, konjac_FI418$TFATperkg_t1, paired = TRUE)
+
+TFATperkg_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "TFATperkg_t1" | konjac_graphs.df_melt$variable == "TFATperkg_t2" | konjac_graphs.df_melt$variable == "TFATperkg_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Normalized total fat\nintake (g/kg/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+TFATperkg.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "TFATperkg_t1" | konjac_graphs.df_melt$variable == "TFATperkg_t2" | konjac_graphs.df_melt$variable == "TFATperkg_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+TFATperkg.test <- TFATperkg.test %>% add_xy_position(x = "time")
+
+TFATperkg_plot <- TFATperkg_plot + stat_pvalue_manual(TFATperkg.test, label = "p", tip.length = 0, size=6)
+
+
+### Fat intake (% of total energy) ----
+shapiro.test(konjac$TFATperc_t1)
+fligner.test(konjac$TFATperc_t1 ~ konjac$treatment)
+t.test(konjac$TFATperc_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$TFATperc_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFATperc_t2)
+fligner.test(konjac$TFATperc_t2 ~ konjac$treatment)
+t.test(konjac$TFATperc_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFATperc_t3)
+fligner.test(konjac$TFATperc_t3 ~ konjac$treatment)
+t.test(konjac$TFATperc_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFATperc_deltat2)
+fligner.test(konjac$TFATperc_deltat2 ~ konjac$treatment)
+t.test(konjac$TFATperc_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$TFATperc_deltat3)
+fligner.test(konjac$TFATperc_deltat3 ~ konjac$treatment)
+t.test(konjac$TFATperc_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$TFATperc_t2, konjac_FI236$TFATperc_t1, paired = TRUE)
+t.test(konjac_FI236$TFATperc_t3, konjac_FI236$TFATperc_t1, paired = TRUE)
+t.test(konjac_FI418$TFATperc_t2, konjac_FI418$TFATperc_t1, paired = TRUE)
+t.test(konjac_FI418$TFATperc_t3, konjac_FI418$TFATperc_t1, paired = TRUE)
+
+TFATperc_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "TFATperc_t1" | konjac_graphs.df_melt$variable == "TFATperc_t2" | konjac_graphs.df_melt$variable == "TFATperc_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 20, linetype = 'dotted', col = 'black') + 
+  geom_hline(yintercept = 35, linetype = 'dotted', col = 'black') + 
+  labs(x = "", y = "Total fat intake (% of energy)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+TFATperc.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "TFATperc_t1" | konjac_graphs.df_melt$variable == "TFATperc_t2" | konjac_graphs.df_melt$variable == "TFATperc_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+TFATperc.test <- TFATperc.test %>% add_xy_position(x = "time")
+
+TFATperc_plot <- TFATperc_plot + stat_pvalue_manual(TFATperc.test, label = "p", tip.length = 0, size=6)
+
+
+### Fiber intake (g/day) ----
+shapiro.test(konjac$FIBE_t1)
+fligner.test(konjac$FIBE_t1 ~ konjac$treatment)
+t.test(konjac$FIBE_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$FIBE_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$FIBE_t2)
+fligner.test(konjac$FIBE_t2 ~ konjac$treatment)
+t.test(konjac$FIBE_t2 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$FIBE_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$FIBE_t3)
+fligner.test(konjac$FIBE_t3 ~ konjac$treatment)
+t.test(konjac$FIBE_t3 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$FIBE_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$FIBE_deltat2)
+fligner.test(konjac$FIBE_deltat2 ~ konjac$treatment)
+t.test(konjac$FIBE_deltat2 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$FIBE_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$FIBE_deltat3)
+fligner.test(konjac$FIBE_deltat3 ~ konjac$treatment)
+t.test(konjac$FIBE_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$FIBE_t2, konjac_FI236$FIBE_t1, paired = TRUE)
+t.test(konjac_FI236$FIBE_t3, konjac_FI236$FIBE_t1, paired = TRUE)
+t.test(konjac_FI418$FIBE_t2, konjac_FI418$FIBE_t1, paired = TRUE)
+t.test(konjac_FI418$FIBE_t3, konjac_FI418$FIBE_t1, paired = TRUE)
+
+FIBE_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "FIBE_t1" | konjac_graphs.df_melt$variable == "FIBE_t2" | konjac_graphs.df_melt$variable == "FIBE_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  geom_hline(yintercept = 16.8, linetype = 'dotted', col = 'black') + # 1200 kcal
+  geom_hline(yintercept = 19.6, linetype = 'dotted', col = 'black') + # 1400 kcal
+  labs(x = "", y = "Fiber intake (g/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+FIBE.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "FIBE_t1" | konjac_graphs.df_melt$variable == "FIBE_t2" | konjac_graphs.df_melt$variable == "FIBE_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+FIBE.test <- FIBE.test %>% add_xy_position(x = "time")
+
+FIBE_plot <- FIBE_plot + stat_pvalue_manual(FIBE.test, label = "p", tip.length = 0, size=6)
+
+
+### Normalized fiber intake (g/kg/day) ----
+shapiro.test(konjac$FIBEperkg_t1)
+fligner.test(konjac$FIBEperkg_t1 ~ konjac$treatment)
+t.test(konjac$FIBEperkg_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$FIBEperkg_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$FIBEperkg_t2)
+fligner.test(konjac$FIBEperkg_t2 ~ konjac$treatment)
+t.test(konjac$FIBEperkg_t2 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$FIBEperkg_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$FIBEperkg_t3)
+fligner.test(konjac$FIBEperkg_t3 ~ konjac$treatment)
+t.test(konjac$FIBEperkg_t3 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$FIBEperkg_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$FIBE_deltat2)
+fligner.test(konjac$FIBE_deltat2 ~ konjac$treatment)
+t.test(konjac$FIBE_deltat2 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$FIBE_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$FIBE_deltat3)
+fligner.test(konjac$FIBE_deltat3 ~ konjac$treatment)
+t.test(konjac$FIBE_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$FIBEperkg_t2, konjac_FI236$FIBEperkg_t1, paired = TRUE)
+t.test(konjac_FI236$FIBEperkg_t3, konjac_FI236$FIBEperkg_t1, paired = TRUE)
+t.test(konjac_FI418$FIBEperkg_t2, konjac_FI418$FIBEperkg_t1, paired = TRUE)
+t.test(konjac_FI418$FIBEperkg_t3, konjac_FI418$FIBEperkg_t1, paired = TRUE)
+
+FIBEperkg_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "FIBEperkg_t1" | konjac_graphs.df_melt$variable == "FIBEperkg_t2" | konjac_graphs.df_melt$variable == "FIBEperkg_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Normalized fiber\nintake (g/kg/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+FIBEperkg.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "FIBEperkg_t1" | konjac_graphs.df_melt$variable == "FIBEperkg_t2" | konjac_graphs.df_melt$variable == "FIBEperkg_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+FIBEperkg.test <- FIBEperkg.test %>% add_xy_position(x = "time")
+
+FIBEperkg_plot <- FIBEperkg_plot + stat_pvalue_manual(FIBEperkg.test, label = "p", tip.length = 0, size=6)
+
+
+### Sugar intake (g/day) ----
+shapiro.test(konjac$SUGR_t1)
+fligner.test(konjac$SUGR_t1 ~ konjac$treatment)
+t.test(konjac$SUGR_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$SUGR_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$SUGR_t2)
+fligner.test(konjac$SUGR_t2 ~ konjac$treatment)
+t.test(konjac$SUGR_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$SUGR_t3)
+fligner.test(konjac$SUGR_t3 ~ konjac$treatment)
+t.test(konjac$SUGR_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$SUGR_deltat2)
+fligner.test(konjac$SUGR_deltat2 ~ konjac$treatment)
+t.test(konjac$SUGR_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$SUGR_deltat3)
+fligner.test(konjac$SUGR_deltat3 ~ konjac$treatment)
+t.test(konjac$SUGR_deltat3 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$SUGR_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$SUGR_t2, konjac_FI236$SUGR_t1, paired = TRUE)
+t.test(konjac_FI236$SUGR_t3, konjac_FI236$SUGR_t1, paired = TRUE)
+t.test(konjac_FI418$SUGR_t2, konjac_FI418$SUGR_t1, paired = TRUE)
+t.test(konjac_FI418$SUGR_t3, konjac_FI418$SUGR_t1, paired = TRUE)
+
+SUGR_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "SUGR_t1" | konjac_graphs.df_melt$variable == "SUGR_t2" | konjac_graphs.df_melt$variable == "SUGR_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Sugar intake (g/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+SUGR.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "SUGR_t1" | konjac_graphs.df_melt$variable == "SUGR_t2" | konjac_graphs.df_melt$variable == "SUGR_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+SUGR.test <- SUGR.test %>% add_xy_position(x = "time")
+
+SUGR_plot <- SUGR_plot + stat_pvalue_manual(SUGR.test, label = "p", tip.length = 0, size=6)
+
+
+### Normalized sugar intake (g/kg/day) ----
+shapiro.test(konjac$SUGRperkg_t1)
+fligner.test(konjac$SUGRperkg_t1 ~ konjac$treatment)
+t.test(konjac$SUGRperkg_t1 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$SUGRperkg_t1 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$SUGRperkg_t2)
+fligner.test(konjac$SUGRperkg_t2 ~ konjac$treatment)
+t.test(konjac$SUGRperkg_t2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$SUGRperkg_t3)
+fligner.test(konjac$SUGRperkg_t3 ~ konjac$treatment)
+t.test(konjac$SUGRperkg_t3 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$SUGR_deltat2)
+fligner.test(konjac$SUGR_deltat2 ~ konjac$treatment)
+t.test(konjac$SUGR_deltat2 ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$SUGR_deltat3)
+fligner.test(konjac$SUGR_deltat3 ~ konjac$treatment)
+t.test(konjac$SUGR_deltat3 ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$SUGR_deltat3 ~ konjac$treatment, paired = TRUE)
+
+t.test(konjac_FI236$SUGRperkg_t2, konjac_FI236$SUGRperkg_t1, paired = TRUE)
+t.test(konjac_FI236$SUGRperkg_t3, konjac_FI236$SUGRperkg_t1, paired = TRUE)
+t.test(konjac_FI418$SUGRperkg_t2, konjac_FI418$SUGRperkg_t1, paired = TRUE)
+t.test(konjac_FI418$SUGRperkg_t3, konjac_FI418$SUGRperkg_t1, paired = TRUE)
+
+SUGRperkg_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "SUGRperkg_t1" | konjac_graphs.df_melt$variable == "SUGRperkg_t2" | konjac_graphs.df_melt$variable == "SUGRperkg_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.6, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Normalized sugar\nintake (g/kg/day)") +
+  scale_x_discrete(breaks=c("t1","t2","t3"),
+                   labels=c("Week 3", "Week 6", "Week 9")) +
+  theme(text = element_text(size = 30))
+
+SUGRperkg.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "SUGRperkg_t1" | konjac_graphs.df_melt$variable == "SUGRperkg_t2" | konjac_graphs.df_melt$variable == "SUGRperkg_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+SUGRperkg.test <- SUGRperkg.test %>% add_xy_position(x = "time")
+
+SUGRperkg_plot <- SUGRperkg_plot + stat_pvalue_manual(SUGRperkg.test, label = "p", tip.length = 0, size=6)
+
+
+# Physical activity ----
+### Daily steps ----
+shapiro.test(konjac$daily_steps)
+fligner.test(konjac$daily_steps ~ konjac$treatment)
+t.test(konjac$daily_steps ~ konjac$treatment, paired = TRUE)
+
+daily_steps_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "daily_steps",], aes(x=treatment, y=value)) +
+  geom_boxplot(aes(fill=treatment, alpha=0.3), fatten = NULL) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  scale_fill_manual(values=c("#0072B2","#D55E00")) + 
+  theme(legend.position = "none") + 
+  labs(x = "", y = "Daily steps") +
+    scale_x_discrete(breaks=c("FI236","FI418"),
+                   labels=c("Control", "Konjac")) +
+  theme(text = element_text(size = 30))
+
+daily_steps.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "daily_steps",] %>%
+  rstatix::mutate(value) %>%
+  rstatix::t_test(value ~ treatment, paired = TRUE)
+daily_steps.test <- daily_steps.test %>% add_xy_position(x = "treatment")
+
+daily_steps_plot <- daily_steps_plot + stat_pvalue_manual(daily_steps.test, tip.length = 0, size=6)
+
+
+# Intervention adherence ----
+shapiro.test(asin(sqrt(konjac$adh_sachets)))
+fligner.test(asin(sqrt(konjac$adh_sachets)) ~ konjac$treatment)
+t.test(asin(sqrt(konjac$adh_sachets)) ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$adh_sachets*100 ~ konjac$treatment, paired = TRUE)
+
+adh_sachets_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "adh_sachets",], aes(x=treatment, y=value*100)) +
+  geom_boxplot(aes(fill=treatment, alpha=0.3), fatten = NULL) +
+  stat_summary(fun=median, color="darkred", geom="crossbar") +
+  scale_fill_manual(values=c("#0072B2","#D55E00")) + 
+  theme(legend.position = "none") + 
+  labs(x = "", y = "Adherence (%)") +
+    scale_x_discrete(breaks=c("FI236","FI418"),
+                   labels=c("Control", "Konjac")) +
+  theme(text = element_text(size = 30))
+
+adh_sachets.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "adh_sachets",] %>%
+  rstatix::mutate(value*100) %>%
+  rstatix::wilcox_test(value*100 ~ treatment, paired = TRUE)
+adh_sachets.test <- adh_sachets.test %>% add_xy_position(x = "treatment")
+
+adh_sachets_plot <- adh_sachets_plot + stat_pvalue_manual(adh_sachets.test, tip.length = 0, size=6)
+
+
+# Supplementary Figure S1 ----
+plot_grid(KCAL_plot, KCALperkg_plot, CARB_plot, CARBperc_plot, PROT_plot, PROTperc_plot, TFAT_plot, TFATperc_plot, FIBE_plot, SUGR_plot, daily_steps_plot, adh_sachets_plot, ncol=4, nrow=3, labels="AUTO")
+
+
+# Fecal short-chain fatty acids (SCFAs) ----
+### Acetate (µmol/g) ----
+shapiro.test(log(konjac$acetic_t1))
+fligner.test(log(konjac$acetic_t1) ~ konjac$treatment)
+t.test(log(konjac$acetic_t1) ~ konjac$treatment, paired = TRUE)
+wilcox.test(log(konjac$acetic_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$acetic_t3))
+fligner.test(log(konjac$acetic_t3) ~ konjac$treatment)
+t.test(log(konjac$acetic_t3) ~ konjac$treatment, paired = TRUE)
+wilcox.test(log(konjac$acetic_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$acetic_delta)
+fligner.test(konjac$acetic_delta ~ konjac$treatment)
+t.test(konjac$acetic_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$acetic_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(log(konjac_FI236$acetic_t3), log(konjac_FI236$acetic_t1), paired = TRUE)
+t.test(log(konjac_FI418$acetic_t3), log(konjac_FI418$acetic_t1), paired = TRUE)
+
+acetic_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "acetic_t1" | konjac_graphs.df_melt$variable == "acetic_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Acetate (µmol/g)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+acetic.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "acetic_t1" | konjac_graphs.df_melt$variable == "acetic_t3",] %>%
+  group_by(treatment) %>%
+  wilcox_test(value ~ time, paired = TRUE)
+acetic.test <- acetic.test %>% add_xy_position(x = "time")
+
+acetic_plot <- acetic_plot + stat_pvalue_manual(acetic.test, tip.length = 0, size=6)
+
+
+### Propionate (µmol/g) ----
+shapiro.test(log(konjac$propionic_t1))
+fligner.test(log(konjac$propionic_t1) ~ konjac$treatment)
+t.test(log(konjac$propionic_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$propionic_t3))
+fligner.test(log(konjac$propionic_t3) ~ konjac$treatment)
+t.test(log(konjac$propionic_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$propionic_delta)
+fligner.test(konjac$propionic_delta ~ konjac$treatment)
+t.test(konjac$propionic_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$propionic_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(log(konjac_FI236$propionic_t3), log(konjac_FI236$propionic_t1), paired = TRUE)
+t.test(log(konjac_FI418$propionic_t3), log(konjac_FI418$propionic_t1), paired = TRUE)
+
+propionic_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "propionic_t1" | konjac_graphs.df_melt$variable == "propionic_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Propionate (µmol/g)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+propionic.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "propionic_t1" | konjac_graphs.df_melt$variable == "propionic_t3",] %>%
+  group_by(treatment) %>%
+  wilcox_test(value ~ time, paired = TRUE)
+propionic.test <- propionic.test %>% add_xy_position(x = "time")
+
+propionic_plot <- propionic_plot + stat_pvalue_manual(propionic.test, tip.length = 0, size=6)
+
+
+### Butyrate (µmol/g) ----
+shapiro.test(log(konjac$butyric_t1))
+fligner.test(log(konjac$butyric_t1) ~ konjac$treatment)
+t.test(log(konjac$butyric_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$butyric_t3))
+fligner.test(log(konjac$butyric_t3) ~ konjac$treatment)
+t.test(log(konjac$butyric_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$butyric_delta)
+fligner.test(konjac$butyric_delta ~ konjac$treatment)
+t.test(konjac$butyric_delta ~ konjac$treatment, paired = TRUE)
+wilcox.test(konjac$butyric_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(log(konjac_FI236$butyric_t3), log(konjac_FI236$butyric_t1), paired = TRUE)
+t.test(log(konjac_FI418$butyric_t3), log(konjac_FI418$butyric_t1), paired = TRUE)
+
+butyric_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "butyric_t1" | konjac_graphs.df_melt$variable == "butyric_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Butyrate (µmol/g)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+butyric.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "butyric_t1" | konjac_graphs.df_melt$variable == "butyric_t3",] %>%
+  group_by(treatment) %>%
+  wilcox_test(value ~ time, paired = TRUE)
+butyric.test <- butyric.test %>% add_xy_position(x = "time")
+
+butyric_plot <- butyric_plot + stat_pvalue_manual(butyric.test, tip.length = 0, size=6)
+
+
+### Isobutyrate (µmol/g) ----
+shapiro.test(log(konjac$isobutyric_t1))
+fligner.test(log(konjac$isobutyric_t1) ~ konjac$treatment)
+t.test(log(konjac$isobutyric_t1) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$isobutyric_t3))
+fligner.test(log(konjac$isobutyric_t3) ~ konjac$treatment)
+t.test(log(konjac$isobutyric_t3) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$isobutyric_delta)
+fligner.test(konjac$isobutyric_delta ~ konjac$treatment)
+t.test(konjac$isobutyric_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(log(konjac_FI236$isobutyric_t3), log(konjac_FI236$isobutyric_t1), paired = TRUE)
+t.test(log(konjac_FI418$isobutyric_t3), log(konjac_FI418$isobutyric_t1), paired = TRUE)
+
+isobutyric_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "isobutyric_t1" | konjac_graphs.df_melt$variable == "isobutyric_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Isobutyrate (µmol/g)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+isobutyric.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "isobutyric_t1" | konjac_graphs.df_melt$variable == "isobutyric_t3",] %>%
+  group_by(treatment) %>%
+  t_test(value ~ time, paired = TRUE)
+isobutyric.test <- isobutyric.test %>% add_xy_position(x = "time")
+
+isobutyric_plot <- isobutyric_plot + stat_pvalue_manual(isobutyric.test, tip.length = 0, size=6)
+
+
+### Valerate (µmol/g) ----
+shapiro.test(log(konjac$valeric_t1+0.01))
+fligner.test(log(konjac$valeric_t1) ~ konjac$treatment)
+t.test(log(konjac$valeric_t1+0.01) ~ konjac$treatment, paired = TRUE)
+wilcox.test(log(konjac$valeric_t1+0.01) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(log(konjac$valeric_t3+0.01))
+fligner.test(log(konjac$valeric_t3+0.01) ~ konjac$treatment)
+t.test(log(konjac$valeric_t3+0.01) ~ konjac$treatment, paired = TRUE)
+wilcox.test(log(konjac$valeric_t3+0.01) ~ konjac$treatment, paired = TRUE)
+
+shapiro.test(konjac$valeric_delta)
+fligner.test(konjac$valeric_delta ~ konjac$treatment)
+t.test(konjac$valeric_delta ~ konjac$treatment, paired = TRUE)
+
+t.test(log(konjac_FI236$valeric_t3+0.01), log(konjac_FI236$valeric_t1+0.01), paired = TRUE)
+t.test(log(konjac_FI418$valeric_t3+0.01), log(konjac_FI418$valeric_t1+0.01), paired = TRUE)
+
+valeric_plot <- ggplot(konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "valeric_t1" | konjac_graphs.df_melt$variable == "valeric_t3",],
+       aes(x=time, y=value)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Valerate (µmol/g)") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+valeric.test <- konjac_graphs.df_melt[konjac_graphs.df_melt$variable == "valeric_t1" | konjac_graphs.df_melt$variable == "valeric_t3",] %>%
+  group_by(treatment) %>%
+  wilcox_test(value ~ time, paired = TRUE)
+valeric.test <- valeric.test %>% add_xy_position(x = "time")
+
+valeric_plot <- valeric_plot + stat_pvalue_manual(valeric.test, tip.length = 0, size=6)
+
+
+### Supplementary Figure S4 ----
+plot_grid(acetic_plot, propionic_plot, butyric_plot, isobutyric_plot, valeric_plot, ncol=3, nrow=2, labels="AUTO")
+
+
+```
+
+# Gut microbiota
+```{r Gut microbiota}
+# Load data ----
+# Metadata
+konjac_meta <- read.delim("konjac.metadata")
+rownames(konjac_meta) <- konjac_meta$id
+
+# OTU table
+otu_mat<-import_mothur(mothur_shared_file=file.path("konjac.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.opti_mcc.shared"))
+
+# Taxonomy table
+tax_mat = read.table("konjac.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.opti_mcc.0.03.rep.unaligned.gtdb_taxonomy.tsv", sep = "\t", header = T)
+# convert to matrix
+taxmat = as.matrix(tax_mat[,-1]) #Remove ID
+rownames(taxmat) <- tax_mat$ID
+taxmat = tax_table(taxmat)
+
+# reference clustering
+taxmat <- taxmat[rownames(taxmat) %in% rownames(otu_mat),]
+
+# Create the phyloseq object
+konjac_ps <- phyloseq(otu_table(otu_mat, taxa_are_rows=TRUE), tax_table(taxmat), sample_data(konjac_meta))
+
+
+# Remove potential contaminants ----
+df <- as.data.frame(sample_data(konjac_ps))
+df$LibrarySize <- sample_sums(konjac_ps)
+df <- df[order(df$LibrarySize),]
+df$Index <- seq(nrow(df))
+ggplot(data=df, aes(x=Index, y=LibrarySize, color=sample_type)) + geom_point()
+
+# Remove contaminants: DNA concentration obtained with a Qubit-like device
+contamdf.freq <- isContaminant(konjac_ps, method="frequency", conc="dna_conc")
+head(contamdf.freq)
+table(contamdf.freq$contaminant)
+which(contamdf.freq$contaminant)
+
+# Remove contaminant taxa and negative controls
+konjac.noncontam <- prune_samples(sample_data(konjac_ps)$sample_type!="control_neg", konjac_ps)
+konjac.noncontam <- prune_taxa(!contamdf.freq$contaminant, konjac.noncontam)
+konjac.noncontam
+
+# Samples with enough depth
+sort(colSums(otu_table(konjac.noncontam)))
+summary(colSums(otu_table(konjac.noncontam)))
+length(which(colSums(otu_table(konjac.noncontam))>10000))
+
+# Remove missing data (N=36)
+# (missing data: KG22 & KG28; pair mates: KG10 & KG17; KG45)
+Samples_to_Remove <- c("KG22", "KG28", "KG10", "KG17", "KG45", "Mock")
+konjac.noncontam <- subset_samples(konjac.noncontam, !(sample %in% Samples_to_Remove))
+
+# Sensitivity analyses --> adherent subjects only (and remove their pairs)
+#Samples_to_Remove <- c("KG22","KG28","KG10","KG17","KG15","KG36","KG18","KG31","KG47","KG61","KG25","KG39","KG45","KG54","KG60","Mock")
+
+konjac.noncontam <- subset_samples(konjac.noncontam, !(sample %in% Samples_to_Remove))
+
+# Rarefy the OTU table
+konjac.rare<-rarefy_even_depth(konjac.noncontam, sample.size=10000, replace=FALSE)
+
+# Remove taxa that are only zero
+konjac.rare <- phyloseq::prune_taxa(phyloseq::taxa_sums(konjac.rare) > 0, konjac.rare)
+
+
+# Agglomerate OTUs at different taxonomic levels and CLR transform ----
+# GTDB v220 taxonomy
+konjac.phylum <- tax_glom(konjac.rare, taxrank = 'Phylum')
+konjac.class <- tax_glom(konjac.rare, taxrank = 'Class')
+konjac.order <- tax_glom(konjac.rare, taxrank = 'Order')
+konjac.family <- tax_glom(konjac.rare, taxrank = 'Family')
+konjac.genus <- tax_glom(konjac.rare, taxrank = 'Genus')
+konjac.species <- tax_glom(konjac.rare, taxrank = 'Species')
+
+
+# Alpha diversity ----
+# Calculate diversity indexes
+konjac_richness = diversityresult(x = t(otu_table(konjac.rare)), index = "richness", method = "each site")
+konjac_shannon = diversityresult(x = t(otu_table(konjac.rare)), index = "Shannon", method = "each site")
+konjac_evenness = diversityresult(x = t(otu_table(konjac.rare)), index = "Jevenness", method = "each site")
+
+# Prepare the dataset
+konjac_alphadiv <- cbind(konjac_richness, konjac_shannon, konjac_evenness, id = sample_data(konjac.rare)$sample, time = sample_data(konjac.rare)$time, sex = sample_data(konjac.rare)$sex, treatment = sample_data(konjac.rare)$treatment, pair_match = sample_data(konjac.rare)$pair_match)
+
+# Split the dataset and calculate deltas
+konjac_alphadiv_FI418 <- konjac_alphadiv[konjac_alphadiv$treatment == "FI418",]
+konjac_alphadiv_FI236 <- konjac_alphadiv[konjac_alphadiv$treatment == "FI236",]
+konjac_alphadiv_t1 <- konjac_alphadiv[konjac_alphadiv$time == "t1",]
+konjac_alphadiv_t3 <- konjac_alphadiv[konjac_alphadiv$time == "t3",]
+
+# Convert the data from long to wide format and calculate deltas
+konjac_alphadiv_wide <- konjac_alphadiv %>%
+  pivot_wider(names_from = time, values_from = c(richness, Shannon, Jevenness))
+
+konjac_richness_delta <- konjac_alphadiv_wide$richness_t3 - konjac_alphadiv_wide$richness_t1
+
+konjac_shannon_delta <- konjac_alphadiv_wide$Shannon_t3 - konjac_alphadiv_wide$Shannon_t1
+
+konjac_Jevenness_delta <- konjac_alphadiv_wide$Jevenness_t3 - konjac_alphadiv_wide$Jevenness_t1
+
+konjac_alphadiv_delta <- data.frame(id = konjac_alphadiv_wide$id, sex = konjac_alphadiv_wide$sex, treatment = konjac_alphadiv_wide$treatment, pair_match = konjac_alphadiv_wide$pair_match, richness_delta = konjac_richness_delta, shannon_delta = konjac_shannon_delta, Jevenness_delta = konjac_Jevenness_delta)
+
+
+# Table 1 ----
+table1(~ richness + Shannon + Jevenness | treatment + time, data = konjac_alphadiv, overall=FALSE, render.continuous=my.render.cont)
+
+table1(~ richness_delta + shannon_delta + Jevenness_delta | treatment, data = konjac_alphadiv_delta, overall=FALSE, render.continuous=my.render.cont)
+
+
+### Plots ----
+# Richness
+richness_plot <- ggplot(konjac_alphadiv, aes(x=time, y=richness)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+#  geom_hline(yintercept = 135, linetype = 'dotted', col = 'red') + 
+#  geom_hline(yintercept = 171, linetype = 'dotted', col = 'darkgreen') + 
+  labs(x = "", y = "OTU richness") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+richness.test <- konjac_alphadiv %>%
+  group_by(treatment) %>%
+  t_test(richness ~ time, paired = TRUE)
+richness.test <- richness.test %>% add_xy_position(x = "time")
+
+richness_plot <- richness_plot + stat_pvalue_manual(richness.test, tip.length = 0, size=6)
+
+
+# Shannon
+shannon_plot <- ggplot(konjac_alphadiv, aes(x=time, y=Shannon)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Shannon diversity index") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+shannon.test <- konjac_alphadiv %>%
+  group_by(treatment) %>%
+  t_test(Shannon ~ time, paired = TRUE)
+shannon.test <- shannon.test %>% add_xy_position(x = "time")
+
+shannon_plot <- shannon_plot + stat_pvalue_manual(shannon.test, tip.length = 0, size=6)
+
+
+# Jevenness
+Jevenness_plot <- ggplot(konjac_alphadiv, aes(x=time, y=Jevenness)) +
+  geom_boxplot(aes(fill = treatment, alpha = time), fatten = NULL) +
+  facet_grid(~treatment, scales = "free", labeller = as_labeller(treatment_names)) +
+  scale_alpha_discrete(range = c(0.9, 0.3)) +
+  scale_fill_manual(values = c("#0072B2","#D55E00")) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  geom_point(aes(color=pair_match, shape=sex), size=3) +
+  scale_shape_manual(values=c(16, 15)) + 
+  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+  geom_line(aes(group=pair_match, color=pair_match)) +
+#  geom_hline(yintercept = 0.606, linetype = 'dotted', col = 'red') + 
+#  geom_hline(yintercept = 0.69, linetype = 'dotted', col = 'darkgreen') + 
+  labs(x = "", y = "Pielou's evenness") +
+  scale_x_discrete(breaks=c("t1","t3"),
+                   labels=c("Baseline", "End")) +
+  theme(text = element_text(size = 30))
+
+Jevenness.test <- konjac_alphadiv %>%
+  group_by(treatment) %>%
+  t_test(Jevenness ~ time, paired = TRUE)
+Jevenness.test <- Jevenness.test %>% add_xy_position(x = "time")
+
+Jevenness_plot <- Jevenness_plot + stat_pvalue_manual(Jevenness.test, tip.length = 0, size=6)
+
+
+### Hypothesis testing ----
+# Richness
+shapiro.test(log(konjac_alphadiv_t1$richness))
+fligner.test(log(konjac_alphadiv_t1$richness) ~ konjac_alphadiv_t1$treatment)
+t.test(log(konjac_alphadiv_t1$richness) ~ konjac_alphadiv_t1$treatment, paired = TRUE)
+shapiro.test(log(konjac_alphadiv_t3$richness))
+fligner.test(log(konjac_alphadiv_t3$richness) ~ konjac_alphadiv_t1$treatment)
+t.test(log(konjac_alphadiv_t3$richness) ~ konjac_alphadiv_t3$treatment, paired = TRUE)
+shapiro.test(konjac_alphadiv_delta$richness_delta)
+fligner.test(konjac_alphadiv_delta$richness_delta ~ konjac_alphadiv_delta$treatment)
+t.test(konjac_alphadiv_delta$richness_delta ~ konjac_alphadiv_delta$treatment, paired = TRUE)
+
+t.test(konjac_alphadiv_FI236$richness ~ konjac_alphadiv_FI236$time, paired = TRUE)
+t.test(konjac_alphadiv_FI418$richness ~ konjac_alphadiv_FI418$time, paired = TRUE)
+
+
+# Shannon
+shapiro.test(log(konjac_alphadiv_t1$Shannon))
+fligner.test(log(konjac_alphadiv_t1$Shannon) ~ konjac_alphadiv_t1$treatment)
+t.test(log(konjac_alphadiv_t1$Shannon) ~ konjac_alphadiv_t1$treatment, paired = TRUE)
+shapiro.test(log(konjac_alphadiv_t3$Shannon))
+fligner.test(log(konjac_alphadiv_t3$Shannon) ~ konjac_alphadiv_t1$treatment)
+t.test(log(konjac_alphadiv_t3$Shannon) ~ konjac_alphadiv_t3$treatment, paired = TRUE)
+shapiro.test(konjac_alphadiv_delta$shannon_delta)
+fligner.test(konjac_alphadiv_delta$shannon_delta ~ konjac_alphadiv_delta$treatment)
+t.test(konjac_alphadiv_delta$shannon_delta ~ konjac_alphadiv_delta$treatment, paired = TRUE)
+
+t.test(konjac_alphadiv_FI236$Shannon ~ konjac_alphadiv_FI236$time, paired = TRUE)
+t.test(konjac_alphadiv_FI418$Shannon ~ konjac_alphadiv_FI418$time, paired = TRUE)
+
+
+# Jevenness (Pielou's Index)
+shapiro.test(konjac_alphadiv_t1$Jevenness)
+t.test(konjac_alphadiv_t1$Jevenness ~ konjac_alphadiv_t1$treatment, paired = TRUE)
+shapiro.test(konjac_alphadiv_t3$Jevenness)
+t.test(konjac_alphadiv_t3$Jevenness ~ konjac_alphadiv_t3$treatment, paired = TRUE)
+shapiro.test(konjac_alphadiv_delta$Jevenness_delta)
+t.test(konjac_alphadiv_delta$Jevenness_delta ~ konjac_alphadiv_delta$treatment, paired = TRUE)
+
+t.test(konjac_alphadiv_FI236$Jevenness ~ konjac_alphadiv_FI236$time, paired = TRUE)
+t.test(konjac_alphadiv_FI418$Jevenness ~ konjac_alphadiv_FI418$time, paired = TRUE)
+
+
+# Beta diversity ----
+# Aitchison distances PCA
+konjac.ait_plot <- konjac.rare %>%
+  tax_transform("clr") %>%
+  ord_calc() %>%
+  ord_plot(colour = "treatment", shape = "sex", size="time", alpha=0.8, auto_caption = NA) +
+  geom_line(aes(group = sample, colour = treatment)) +
+  stat_ellipse(aes(linetype = time, colour = treatment), show.legend = FALSE) +
+  scale_color_manual(values=c("#0072B2","#D55E00"), name="Treatment", breaks=c("FI236", "FI418"), labels=c("Control", "Konjac")) +
+  scale_shape_manual(values=c(16, 15), name="Sex", breaks=c("female", "male"), labels=c("Female", "Male")) +
+  scale_size_manual(values=c(2, 4), name="Time", breaks=c("t1", "t3"), labels=c("Baseline", "End"))
+
+konjac.ait_dist <- dist_calc(konjac.rare, dist = "aitchison")
+
+konjac.ait_dist_t1 <- prune_samples(sample_data(konjac.ait_dist)$time=="t1", konjac.ait_dist)
+konjac.ait_dist_t3 <- prune_samples(sample_data(konjac.ait_dist)$time=="t3", konjac.ait_dist)
+konjac.ait_dist_FI236 <- prune_samples(sample_data(konjac.ait_dist)$treatment=="FI236", konjac.ait_dist)
+konjac.ait_dist_FI418 <- prune_samples(sample_data(konjac.ait_dist)$treatment=="FI418", konjac.ait_dist)
+
+
+### PERMANOVA ----
+ait_perm1 <- konjac.ait_dist %>%
+  dist_permanova(
+    seed = 1234, # for set.seed to ensure reproducibility of random process
+    n_processes = 1, n_perms = 9999, # you should use at least 999!
+    variables = "sample + time"
+  )
+perm_get(ait_perm1)
+
+ait_perm2 <- konjac.ait_dist %>%
+  dist_permanova(
+    seed = 1234, # for set.seed to ensure reproducibility of random process
+    n_processes = 1, n_perms = 9999, # you should use at least 999!
+    variables = "treatment + time"
+  )
+perm_get(ait_perm2)
+
+# Separate analysis per time point
+ait_perm3 <- konjac.ait_dist_t1 %>%
+  dist_permanova(
+    seed = 1234, # for set.seed to ensure reproducibility of random process
+    n_processes = 1, n_perms = 9999, # you should use at least 999!
+    variables = "treatment"
+  )
+perm_get(ait_perm3)
+
+ait_perm4 <- konjac.ait_dist_t3 %>%
+  dist_permanova(
+    seed = 1234, # for set.seed to ensure reproducibility of random process
+    n_processes = 1, n_perms = 9999, # you should use at least 999!
+    variables = "treatment"
+  )
+perm_get(ait_perm4)
+
+# Separate analysis per treatment
+ait_perm5 <- konjac.ait_dist_FI236 %>%
+  dist_permanova(
+    seed = 1234, # for set.seed to ensure reproducibility of random process
+    n_processes = 1, n_perms = 9999, # you should use at least 999!
+    variables = "time + sample"
+  )
+perm_get(ait_perm5)
+
+ait_perm6 <- konjac.ait_dist_FI418 %>%
+  dist_permanova(
+    seed = 1234, # for set.seed to ensure reproducibility of random process
+    n_processes = 1, n_perms = 9999, # you should use at least 999!
+    variables = "time + sample"
+  )
+perm_get(ait_perm6)
+
+
+# Compute within-subject distance/dissimilarity for paired samples and then test for the difference between groups
+aitchison_dist <- dist_calc(konjac.rare, dist = "aitchison") %>% dist_get()
+aitchison_df <- melt(as.matrix(aitchison_dist))
+
+aitchison_df <- aitchison_df %>%
+  separate(Var1, into = c("sample_1", "time_1"), sep = "t", remove = FALSE) %>%
+  separate(Var2, into = c("sample_2", "time_2"), sep = "t", remove = FALSE) %>%
+  mutate(time_1 = ifelse(time_1 == "1", "t1", ifelse(time_1 == "2", "t2", time_1)),
+         time_2 = ifelse(time_2 == "1", "t1", ifelse(time_2 == "2", "t2", time_2))) %>%
+  plotly::filter(sample_1 == sample_2) %>%
+  plotly::filter(time_1 == "t1") %>%
+  plotly::filter(time_2 == "t2") %>%
+  dplyr::select(sample_1, value) %>%
+  dplyr::rename("sample" = "sample_1",
+                "aitchison_t1t2" = "value")
+
+meta_df <- data.frame(sample_data(konjac.rare)) %>%
+  plotly::filter(time == "t1") %>%
+  dplyr::select(sample, time, sex, treatment, pair_match)
+
+aitchison_df <- left_join(aitchison_df, meta_df)
+
+shapiro.test(aitchison_df$aitchison_t1t2)
+fligner.test(aitchison_t1t2 ~ treatment, data = aitchison_df)
+t.test(aitchison_t1t2 ~ treatment, data = aitchison_df, paired = TRUE)
+
+aitchinson_plot <- ggplot(aitchison_df, aes(x=treatment, y=aitchison_t1t2)) +
+  geom_boxplot(aes(fill=treatment, alpha=0.3), fatten = NULL) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  scale_fill_manual(values=c("#0072B2","#D55E00")) +
+#  geom_point(aes(color=pair_match, shape=sex), size=3) +
+#  scale_shape_manual(values=c(16, 15)) + 
+#  scale_color_manual(values=my_palette) +
+  theme(legend.position = "none") + 
+#  geom_line(aes(group=pair_match, color=pair_match)) +
+  labs(x = "", y = "Aitchison distances\nbetween baseline and\nend of the study") +
+  scale_x_discrete(breaks=c("FI236","FI418"),
+                   labels=c("Control", "Konjac")) +
+  theme(text = element_text(size = 30))
+
+aitchinson.test <- aitchison_df %>%
+  t_test(aitchison_t1t2 ~ treatment, paired = TRUE)
+aitchinson.test <- aitchinson.test %>% add_xy_position(x = "treatment")
+
+aitchinson_plot <- aitchinson_plot + stat_pvalue_manual(aitchinson.test, tip.length = 0, size=6)
+
+
+### Lin's concordance correlation coefficients (CCC): OTU abundance
+
+# Get lower triangle of the correlation matrix
+get_lower_tri = function(x){
+  x[upper.tri(x, diag=TRUE)] = NA
+  return(x)
+}
+
+# Aitchison distances
+aitchison_dist <- as.matrix(aitchison_dist)
+aitchison_dist_low_tri <- get_lower_tri(aitchison_dist)
+melted_aitchison_dist = melt(aitchison_dist_low_tri, na.rm = TRUE)
+id1 <- str_extract(melted_aitchison_dist$Var1, "KG[0-9]+")
+id2 <- str_extract(melted_aitchison_dist$Var2, "KG[0-9]+")
+comparison <- function(x, y) ifelse(x == y, "intra", "inter")
+id3 = comparison(id1, id2)
+
+aitchison_dist.df <- data.frame(ait = melted_aitchison_dist$value, Var1 = melted_aitchison_dist$Var1, Var2 = melted_aitchison_dist$Var2, id1 = id1, id2 = id2, id3 = id3)
+aggregate(ait ~ id3, FUN = mean, data = aitchison_dist.df)
+
+# Correlations after removing  the diagonal of the correlation matrix
+intra_inter.aitchison <- ggplot(aitchison_dist.df, aes(x=id3, y=ait)) +
+  theme(panel.border = element_blank(), panel.background = element_blank(), legend.position="none") +
+  labs(x = "", y = "Aitchison distances\nbetween pairs of samples") +
+  geom_jitter(width=0.2, color="gray", size=1) +
+  geom_boxplot(outlier.shape=NA, alpha = 0, fatten = NULL) +
+  stat_summary(fun=mean, color="darkred", geom="crossbar") +
+  scale_x_discrete(breaks=c("inter","intra"),
+                   labels=c("Between\nsubjects", "Same\nsubject")) +
+  theme(text = element_text(size = 30))
+
+intra_inter.aitchison.test <- aitchison_dist.df %>%
+  t_test(ait ~ id3)
+intra_inter.aitchison.test <- intra_inter.aitchison.test %>% add_xy_position(x = "id3")
+
+intra_inter.aitchison <- intra_inter.aitchison + stat_pvalue_manual(intra_inter.aitchison.test, tip.length = 0, size=6)
+
+# Figure 5 ----
+top_row <- plot_grid(LBP_plot, shannon_plot, align = "h", axis = "l", ncol = 2, labels=c("A","B"))
+middle_row <- plot_grid(konjac.ait_plot, align = "h", axis = "l", ncol = 1, labels="C")
+bottom_row <- plot_grid(intra_inter.aitchison, aitchinson_plot, align = "h", axis = "l", ncol = 2, labels=c("D","E"))
+plot_grid(top_row, middle_row, bottom_row, ncol = 1)
+
+
+# Differential abundance (ALDEx2) ----
+
+### Phylum ----
+# all treatments
+konjac.phylum.aldex <- aldex.clr(otu_table(konjac.phylum), sample_data(konjac.phylum)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.phylum.tt <- aldex.ttest(konjac.phylum.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.phylum.effect <- aldex.effect(konjac.phylum.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.phylum.all <- data.frame(tax_table(konjac.phylum),konjac.phylum.tt,konjac.phylum.effect)
+konjac.phylum.sig <- konjac.phylum.all[which(konjac.phylum.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.phylum.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.phylum.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.phylum.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# FI236
+konjac.phylum.FI236 <- prune_samples(sample_data(konjac.phylum)$treatment=="FI236", konjac.phylum)
+konjac.phylum.FI236.aldex <- aldex.clr(otu_table(konjac.phylum.FI236), sample_data(konjac.phylum.FI236)$time, mc.samples=1000, denom="all", verbose=F)
+konjac.phylum.FI236.tt <- aldex.ttest(konjac.phylum.FI236.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.phylum.FI236.effect <- aldex.effect(konjac.phylum.FI236.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.phylum.FI236.all <- data.frame(tax_table(prune_taxa(rownames(konjac.phylum.FI236.tt), konjac.phylum.FI236)),konjac.phylum.FI236.tt,konjac.phylum.FI236.effect)
+konjac.phylum.FI236.sig <- konjac.phylum.FI236.all[which(konjac.phylum.FI236.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.phylum.FI236.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.phylum.FI236.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.phylum.FI236.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# FI418
+konjac.phylum.FI418 <- prune_samples(sample_data(konjac.phylum)$treatment=="FI418", konjac.phylum)
+konjac.phylum.FI418.aldex <- aldex.clr(otu_table(konjac.phylum.FI418), sample_data(konjac.phylum.FI418)$time, mc.samples=1000, denom="all", verbose=F)
+konjac.phylum.FI418.tt <- aldex.ttest(konjac.phylum.FI418.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.phylum.FI418.effect <- aldex.effect(konjac.phylum.FI418.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.phylum.FI418.all <- data.frame(tax_table(prune_taxa(rownames(konjac.phylum.FI418.tt), konjac.phylum.FI418)),konjac.phylum.FI418.tt,konjac.phylum.FI418.effect)
+konjac.phylum.FI418.sig <- konjac.phylum.FI418.all[which(konjac.phylum.FI418.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.phylum.FI418.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.phylum.FI418.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.phylum.FI418.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# t1
+konjac.phylum.t1 <- prune_samples(sample_data(konjac.phylum)$time=="t1", konjac.phylum)
+konjac.phylum.t1.aldex <- aldex.clr(otu_table(konjac.phylum.t1), sample_data(konjac.phylum.t1)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.phylum.t1.tt <- aldex.ttest(konjac.phylum.t1.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.phylum.t1.effect <- aldex.effect(konjac.phylum.t1.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.phylum.t1.all <- data.frame(tax_table(prune_taxa(rownames(konjac.phylum.t1.tt), konjac.phylum.t1)),konjac.phylum.t1.tt,konjac.phylum.t1.effect)
+konjac.phylum.t1.sig <- konjac.phylum.t1.all[which(konjac.phylum.t1.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.phylum.t1.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.phylum.t1.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.phylum.t1.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# t3
+konjac.phylum.t3 <- prune_samples(sample_data(konjac.phylum)$time=="t3", konjac.phylum)
+konjac.phylum.t3.aldex <- aldex.clr(otu_table(konjac.phylum.t3), sample_data(konjac.phylum.t3)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.phylum.t3.tt <- aldex.ttest(konjac.phylum.t3.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.phylum.t3.effect <- aldex.effect(konjac.phylum.t3.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.phylum.t3.all <- data.frame(tax_table(prune_taxa(rownames(konjac.phylum.t3.tt), konjac.phylum.t3)),konjac.phylum.t3.tt,konjac.phylum.t3.effect)
+konjac.phylum.t3.sig <- konjac.phylum.t3.all[which(konjac.phylum.t3.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.phylum.t3.all, type="MA", test="welch", xlab="Log-ratio abundance",
+           ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.phylum.t3.all, type="MW", test="welch", xlab="Dispersion",
+    ylab="Difference", main='Effect plot')
+aldex.plot(konjac.phylum.t3.all, type="volcano", test="welch", xlab="Difference",
+    ylab="-1(log10(q))", main='Volcano plot')
+
+
+### Family ----
+# all treatments
+konjac.family.aldex <- aldex.clr(otu_table(konjac.family), sample_data(konjac.family)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.family.tt <- aldex.ttest(konjac.family.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.family.effect <- aldex.effect(konjac.family.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.family.all <- data.frame(tax_table(konjac.family),konjac.family.tt,konjac.family.effect)
+konjac.family.sig <- konjac.family.all[which(konjac.family.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.family.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.family.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.family.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# FI236
+konjac.family.FI236 <- prune_samples(sample_data(konjac.family)$treatment=="FI236", konjac.family)
+konjac.family.FI236.aldex <- aldex.clr(otu_table(konjac.family.FI236), sample_data(konjac.family.FI236)$time, mc.samples=1000, denom="all", verbose=F)
+konjac.family.FI236.tt <- aldex.ttest(konjac.family.FI236.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.family.FI236.effect <- aldex.effect(konjac.family.FI236.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.family.FI236.all <- data.frame(tax_table(prune_taxa(rownames(konjac.family.FI236.tt), konjac.family.FI236)),konjac.family.FI236.tt,konjac.family.FI236.effect)
+konjac.family.FI236.sig <- konjac.family.FI236.all[which(konjac.family.FI236.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.family.FI236.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.family.FI236.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.family.FI236.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# FI418
+konjac.family.FI418 <- prune_samples(sample_data(konjac.family)$treatment=="FI418", konjac.family)
+konjac.family.FI418.aldex <- aldex.clr(otu_table(konjac.family.FI418), sample_data(konjac.family.FI418)$time, mc.samples=1000, denom="all", verbose=F)
+konjac.family.FI418.tt <- aldex.ttest(konjac.family.FI418.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.family.FI418.effect <- aldex.effect(konjac.family.FI418.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.family.FI418.all <- data.frame(tax_table(prune_taxa(rownames(konjac.family.FI418.tt), konjac.family.FI418)),konjac.family.FI418.tt,konjac.family.FI418.effect)
+konjac.family.FI418.sig <- konjac.family.FI418.all[which(konjac.family.FI418.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.family.FI418.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.family.FI418.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.family.FI418.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# t1
+konjac.family.t1 <- prune_samples(sample_data(konjac.family)$time=="t1", konjac.family)
+konjac.family.t1.aldex <- aldex.clr(otu_table(konjac.family.t1), sample_data(konjac.family.t1)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.family.t1.tt <- aldex.ttest(konjac.family.t1.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.family.t1.effect <- aldex.effect(konjac.family.t1.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.family.t1.all <- data.frame(tax_table(prune_taxa(rownames(konjac.family.t1.tt), konjac.family.t1)),konjac.family.t1.tt,konjac.family.t1.effect)
+konjac.family.t1.sig <- konjac.family.t1.all[which(konjac.family.t1.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.family.t1.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.family.t1.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.family.t1.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# t3
+konjac.family.t3 <- prune_samples(sample_data(konjac.family)$time=="t3", konjac.family)
+konjac.family.t3.aldex <- aldex.clr(otu_table(konjac.family.t3), sample_data(konjac.family.t3)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.family.t3.tt <- aldex.ttest(konjac.family.t3.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.family.t3.effect <- aldex.effect(konjac.family.t3.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.family.t3.all <- data.frame(tax_table(prune_taxa(rownames(konjac.family.t3.tt), konjac.family.t3)),konjac.family.t3.tt,konjac.family.t3.effect)
+konjac.family.t3.sig <- konjac.family.t3.all[which(konjac.family.t3.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.family.t3.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.family.t3.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.family.t3.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+
+### Genus ----
+# all treatments
+konjac.genus.aldex <- aldex.clr(otu_table(konjac.genus), sample_data(konjac.genus)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.genus.tt <- aldex.ttest(konjac.genus.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.genus.effect <- aldex.effect(konjac.genus.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.genus.all <- data.frame(tax_table(konjac.genus),konjac.genus.tt,konjac.genus.effect)
+konjac.genus.sig <- konjac.genus.all[which(konjac.genus.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.genus.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.genus.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.genus.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# FI236
+konjac.genus.FI236 <- prune_samples(sample_data(konjac.genus)$treatment=="FI236", konjac.genus)
+konjac.genus.FI236.aldex <- aldex.clr(otu_table(konjac.genus.FI236), sample_data(konjac.genus.FI236)$time, mc.samples=1000, denom="all", verbose=F)
+konjac.genus.FI236.tt <- aldex.ttest(konjac.genus.FI236.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.genus.FI236.effect <- aldex.effect(konjac.genus.FI236.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.genus.FI236.all <- data.frame(tax_table(prune_taxa(rownames(konjac.genus.FI236.tt), konjac.genus.FI236)),konjac.genus.FI236.tt,konjac.genus.FI236.effect)
+konjac.genus.FI236.sig <- konjac.genus.FI236.all[which(konjac.genus.FI236.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.genus.FI236.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.genus.FI236.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.genus.FI236.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# FI418
+konjac.genus.FI418 <- prune_samples(sample_data(konjac.genus)$treatment=="FI418", konjac.genus)
+konjac.genus.FI418.aldex <- aldex.clr(otu_table(konjac.genus.FI418), sample_data(konjac.genus.FI418)$time, mc.samples=1000, denom="all", verbose=F)
+konjac.genus.FI418.tt <- aldex.ttest(konjac.genus.FI418.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.genus.FI418.effect <- aldex.effect(konjac.genus.FI418.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.genus.FI418.all <- data.frame(tax_table(prune_taxa(rownames(konjac.genus.FI418.tt), konjac.genus.FI418)),konjac.genus.FI418.tt,konjac.genus.FI418.effect)
+konjac.genus.FI418.sig <- konjac.genus.FI418.all[which(konjac.genus.FI418.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.genus.FI418.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.genus.FI418.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.genus.FI418.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+konjac.genus.FI418.sig <- konjac.genus.FI418.all[which(konjac.genus.FI418.all$wi.ep<0.1),]
+konjac.genus.FI418.sigtaxa <- prune_taxa(rownames(konjac.genus.FI418.sig), konjac.genus.clr)
+
+# t1
+konjac.genus.t1 <- prune_samples(sample_data(konjac.genus)$time=="t1", konjac.genus)
+konjac.genus.t1.aldex <- aldex.clr(otu_table(konjac.genus.t1), sample_data(konjac.genus.t1)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.genus.t1.tt <- aldex.ttest(konjac.genus.t1.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.genus.t1.effect <- aldex.effect(konjac.genus.t1.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.genus.t1.all <- data.frame(tax_table(prune_taxa(rownames(konjac.genus.t1.tt), konjac.genus.t1)),konjac.genus.t1.tt,konjac.genus.t1.effect)
+konjac.genus.t1.sig <- konjac.genus.t1.all[which(konjac.genus.t1.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.genus.t1.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.genus.t1.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.genus.t1.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# t3
+konjac.genus.t3 <- prune_samples(sample_data(konjac.genus)$time=="t3", konjac.genus)
+konjac.genus.t3.aldex <- aldex.clr(otu_table(konjac.genus.t3), sample_data(konjac.genus.t3)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.genus.t3.tt <- aldex.ttest(konjac.genus.t3.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.genus.t3.effect <- aldex.effect(konjac.genus.t3.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.genus.t3.all <- data.frame(tax_table(prune_taxa(rownames(konjac.genus.t3.tt), konjac.genus.t3)),konjac.genus.t3.tt,konjac.genus.t3.effect)
+konjac.genus.t3.sig <- konjac.genus.t3.all[which(konjac.genus.t3.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.genus.t3.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.genus.t3.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.genus.t3.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+
+### Species ----
+# all treatments
+konjac.species.aldex <- aldex.clr(otu_table(konjac.species), sample_data(konjac.species)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.species.tt <- aldex.ttest(konjac.species.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.species.effect <- aldex.effect(konjac.species.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.species.all <- data.frame(tax_table(konjac.species),konjac.species.tt,konjac.species.effect)
+konjac.species.sig <- konjac.species.all[which(konjac.species.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.species.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.species.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.species.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# FI236
+konjac.species.FI236 <- prune_samples(sample_data(konjac.species)$treatment=="FI236", konjac.species)
+konjac.species.FI236.aldex <- aldex.clr(otu_table(konjac.species.FI236), sample_data(konjac.species.FI236)$time, mc.samples=1000, denom="all", verbose=F)
+konjac.species.FI236.tt <- aldex.ttest(konjac.species.FI236.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.species.FI236.effect <- aldex.effect(konjac.species.FI236.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.species.FI236.all <- data.frame(tax_table(prune_taxa(rownames(konjac.species.FI236.tt), konjac.species.FI236)),konjac.species.FI236.tt,konjac.species.FI236.effect)
+konjac.species.FI236.sig <- konjac.species.FI236.all[which(konjac.species.FI236.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.species.FI236.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.species.FI236.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.species.FI236.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# FI418
+konjac.species.FI418 <- prune_samples(sample_data(konjac.species)$treatment=="FI418", konjac.species)
+konjac.species.FI418.aldex <- aldex.clr(otu_table(konjac.species.FI418), sample_data(konjac.species.FI418)$time, mc.samples=1000, denom="all", verbose=F)
+konjac.species.FI418.tt <- aldex.ttest(konjac.species.FI418.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.species.FI418.effect <- aldex.effect(konjac.species.FI418.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.species.FI418.all <- data.frame(tax_table(prune_taxa(rownames(konjac.species.FI418.tt), konjac.species.FI418)),konjac.species.FI418.tt,konjac.species.FI418.effect)
+konjac.species.FI418.sig <- konjac.species.FI418.all[which(konjac.species.FI418.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.species.FI418.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.species.FI418.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.species.FI418.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# t1
+konjac.species.t1 <- prune_samples(sample_data(konjac.species)$time=="t1", konjac.species)
+konjac.species.t1.aldex <- aldex.clr(otu_table(konjac.species.t1), sample_data(konjac.species.t1)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.species.t1.tt <- aldex.ttest(konjac.species.t1.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.species.t1.effect <- aldex.effect(konjac.species.t1.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.species.t1.all <- data.frame(tax_table(prune_taxa(rownames(konjac.species.t1.tt), konjac.species.t1)),konjac.species.t1.tt,konjac.species.t1.effect)
+konjac.species.t1.sig <- konjac.species.t1.all[which(konjac.species.t1.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.species.t1.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.species.t1.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.species.t1.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# t3
+konjac.species.t3 <- prune_samples(sample_data(konjac.species)$time=="t3", konjac.species)
+konjac.species.t3.aldex <- aldex.clr(otu_table(konjac.species.t3), sample_data(konjac.species.t3)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.species.t3.tt <- aldex.ttest(konjac.species.t3.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.species.t3.effect <- aldex.effect(konjac.species.t3.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.species.t3.all <- data.frame(tax_table(prune_taxa(rownames(konjac.species.t3.tt), konjac.species.t3)),konjac.species.t3.tt,konjac.species.t3.effect)
+konjac.species.t3.sig <- konjac.species.t3.all[which(konjac.species.t3.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.species.t3.all, type="MA", test="welch", xlab="Log-ratio abundance",
+           ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.species.t3.all, type="MW", test="welch", xlab="Dispersion",
+    ylab="Difference", main='Effect plot')
+aldex.plot(konjac.species.t3.all, type="volcano", test="welch", xlab="Difference",
+    ylab="-1(log10(q))", main='Volcano plot')
+
+
+### OTU ----
+# all treatments
+konjac.rare.aldex <- aldex.clr(otu_table(konjac.rare), sample_data(konjac.rare)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.rare.tt <- aldex.ttest(konjac.rare.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.rare.effect <- aldex.effect(konjac.rare.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.rare.all <- data.frame(tax_table(konjac.rare),konjac.rare.tt,konjac.rare.effect)
+konjac.rare.sig <- konjac.rare.all[which(konjac.rare.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.rare.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.rare.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.rare.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# FI236
+konjac.rare.FI236 <- prune_samples(sample_data(konjac.rare)$treatment=="FI236", konjac.rare)
+konjac.rare.FI236.aldex <- aldex.clr(otu_table(konjac.rare.FI236), sample_data(konjac.rare.FI236)$time, mc.samples=1000, denom="all", verbose=F)
+konjac.rare.FI236.tt <- aldex.ttest(konjac.rare.FI236.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.rare.FI236.effect <- aldex.effect(konjac.rare.FI236.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.rare.FI236.all <- data.frame(tax_table(prune_taxa(rownames(konjac.rare.FI236.tt), konjac.rare.FI236)),konjac.rare.FI236.tt,konjac.rare.FI236.effect)
+konjac.rare.FI236.sig <- konjac.rare.FI236.all[which(konjac.rare.FI236.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.rare.FI236.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.rare.FI236.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.rare.FI236.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# FI418
+konjac.rare.FI418 <- prune_samples(sample_data(konjac.rare)$treatment=="FI418", konjac.rare)
+konjac.rare.FI418.aldex <- aldex.clr(otu_table(konjac.rare.FI418), sample_data(konjac.rare.FI418)$time, mc.samples=1000, denom="all", verbose=F)
+konjac.rare.FI418.tt <- aldex.ttest(konjac.rare.FI418.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.rare.FI418.effect <- aldex.effect(konjac.rare.FI418.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.rare.FI418.all <- data.frame(tax_table(prune_taxa(rownames(konjac.rare.FI418.tt), konjac.rare.FI418)),konjac.rare.FI418.tt,konjac.rare.FI418.effect)
+konjac.rare.FI418.sig <- konjac.rare.FI418.all[which(konjac.rare.FI418.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.rare.FI418.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.rare.FI418.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.rare.FI418.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# t1
+konjac.rare.t1 <- prune_samples(sample_data(konjac.rare)$time=="t1", konjac.rare)
+konjac.rare.t1.aldex <- aldex.clr(otu_table(konjac.rare.t1), sample_data(konjac.rare.t1)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.rare.t1.tt <- aldex.ttest(konjac.rare.t1.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.rare.t1.effect <- aldex.effect(konjac.rare.t1.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.rare.t1.all <- data.frame(tax_table(prune_taxa(rownames(konjac.rare.t1.tt), konjac.rare.t1)),konjac.rare.t1.tt,konjac.rare.t1.effect)
+konjac.rare.t1.sig <- konjac.rare.t1.all[which(konjac.rare.t1.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.rare.t1.all, type="MA", test="welch", xlab="Log-ratio abundance", ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.rare.t1.all, type="MW", test="welch", xlab="Dispersion", ylab="Difference", main='Effect plot')
+aldex.plot(konjac.rare.t1.all, type="volcano", test="welch", xlab="Difference", ylab="-1(log10(q))", main='Volcano plot')
+
+# t3
+konjac.rare.t3 <- prune_samples(sample_data(konjac.rare)$time=="t3", konjac.rare)
+konjac.rare.t3.aldex <- aldex.clr(otu_table(konjac.rare.t3), sample_data(konjac.rare.t3)$treatment, mc.samples=1000, denom="all", verbose=F)
+konjac.rare.t3.tt <- aldex.ttest(konjac.rare.t3.aldex, paired.test=TRUE, verbose=FALSE)
+konjac.rare.t3.effect <- aldex.effect(konjac.rare.t3.aldex, CI=T, verbose=FALSE, paired.test=TRUE)
+konjac.rare.t3.all <- data.frame(tax_table(prune_taxa(rownames(konjac.rare.t3.tt), konjac.rare.t3)),konjac.rare.t3.tt,konjac.rare.t3.effect)
+konjac.rare.t3.sig <- konjac.rare.t3.all[which(konjac.rare.t3.all$wi.eBH<0.2),]
+par(mfrow=c(1,3))
+aldex.plot(konjac.rare.t3.all, type="MA", test="welch", xlab="Log-ratio abundance",
+           ylab="Difference", main='Bland-Altman plot')
+aldex.plot(konjac.rare.t3.all, type="MW", test="welch", xlab="Dispersion",
+    ylab="Difference", main='Effect plot')
+aldex.plot(konjac.rare.t3.all, type="volcano", test="welch", xlab="Difference",
+    ylab="-1(log10(q))", main='Volcano plot')
+
+```
